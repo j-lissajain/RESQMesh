@@ -15,6 +15,8 @@ import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import com.resqmesh.app.data.EmergencyWireCodec
+import com.resqmesh.app.data.EmergencyReport
 import java.nio.charset.StandardCharsets
 import java.util.ArrayDeque
 import java.util.LinkedHashMap
@@ -53,8 +55,23 @@ data class ChatMessage(
     val id: String,
     val text: String,
     val isIncoming: Boolean,
-    val state: MessageDeliveryState
+    val state: MessageDeliveryState,
+    val kind: ChatMessageKind = ChatMessageKind.CHAT,
+    val emergencyId: String? = null
 )
+
+enum class ChatMessageKind {
+    CHAT,
+    EMERGENCY
+}
+
+enum class EmergencyTransmissionState {
+    READY_TO_SEND,
+    SENDING,
+    TRANSPORT_ACKNOWLEDGED,
+    FAILED,
+    DISCONNECTED
+}
 
 data class BleMessagingState(
     val serverReady: Boolean = false,
@@ -62,6 +79,7 @@ data class BleMessagingState(
     val selectedPeerId: String? = null,
     val connectedPeerId: String? = null,
     val messages: List<ChatMessage> = emptyList(),
+    val emergencyTransmissions: Map<String, EmergencyTransmissionState> = emptyMap(),
     val error: String? = null
 )
 
@@ -79,6 +97,8 @@ class BleMessagingManager(context: Context) : AutoCloseable {
     private val pendingMessages = LinkedHashMap<Long, PendingOutgoingMessage>()
     private val receivedMessageIds = LinkedHashSet<Long>()
     private val messages = ArrayDeque<ChatMessage>()
+    private val pendingEmergencyIds = LinkedHashMap<Long, String>()
+    private var emergencyReceiver: ((EmergencyReport, String?) -> Unit)? = null
 
     private var gattServer: BluetoothGattServer? = null
     private var messageCharacteristic: BluetoothGattCharacteristic? = null
@@ -194,6 +214,10 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         localAnonymousId = localSessionId
     }
 
+    fun setEmergencyReceiver(receiver: ((EmergencyReport, String?) -> Unit)?) {
+        emergencyReceiver = receiver
+    }
+
     fun selectPeer(peerId: String) {
         selectedPeerId = peerId
         publish(_state.copy(selectedPeerId = peerId))
@@ -203,8 +227,12 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         pendingMessages.values.forEach { pending ->
             cancelTimeout(pending)
             updateMessageState(pending.messageId, MessageDeliveryState.DISCONNECTED)
+            pending.emergencyId?.let {
+                updateEmergencyTransmission(it, EmergencyTransmissionState.DISCONNECTED)
+            }
         }
         pendingMessages.clear()
+        pendingEmergencyIds.clear()
         closeClientConnection(markPending = false)
         closeServerConnections(markPending = false)
         gattServer?.close()
@@ -327,7 +355,8 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         val pending = PendingOutgoingMessage(
             messageId = messageId,
             route = route,
-            attempts = 1
+            attempts = 1,
+            payload = payload
         )
         pendingMessages[messageId] = pending
         if (!sendFrame(route, BleFrameType.MESSAGE, messageId, payload)) {
@@ -337,6 +366,70 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         } else {
             scheduleAckTimeout(pending)
         }
+    }
+
+    fun sendEmergency(report: EmergencyReport): Boolean {
+        if (closed) return false
+        val route = findActiveRoute()
+        if (route == null) {
+            publish(
+                _state.copy(
+                    emergencyTransmissions = _state.emergencyTransmissions +
+                        (report.id to EmergencyTransmissionState.READY_TO_SEND),
+                    error = "Connect to a nearby peer before sending this emergency."
+                )
+            )
+            return false
+        }
+        val payload = runCatching { EmergencyWireCodec.encode(report, report.originId ?: localAnonymousId) }
+            .getOrElse {
+                publish(
+                    _state.copy(
+                        emergencyTransmissions = _state.emergencyTransmissions +
+                            (report.id to EmergencyTransmissionState.FAILED),
+                        error = "This emergency could not be encoded for BLE transmission."
+                    )
+                )
+                return false
+            }
+        val messageId = BleMessageProtocol.newMessageId()
+        appendMessage(
+            ChatMessage(
+                id = BleMessageProtocol.messageIdLabel(messageId),
+                text = "Emergency report ${report.id}",
+                isIncoming = false,
+                state = MessageDeliveryState.SENDING,
+                kind = ChatMessageKind.EMERGENCY,
+                emergencyId = report.id
+            )
+        )
+        val pending = PendingOutgoingMessage(
+            messageId = messageId,
+            route = route,
+            attempts = 1,
+            payload = payload,
+            kind = ChatMessageKind.EMERGENCY,
+            emergencyId = report.id
+        )
+        pendingMessages[messageId] = pending
+        pendingEmergencyIds[messageId] = report.id
+        publish(
+            _state.copy(
+                emergencyTransmissions = _state.emergencyTransmissions +
+                    (report.id to EmergencyTransmissionState.SENDING),
+                error = null
+            )
+        )
+        if (!sendFrame(route, BleFrameType.MESSAGE, messageId, payload)) {
+            pendingMessages.remove(messageId)
+            pendingEmergencyIds.remove(messageId)
+            updateMessageState(messageId, MessageDeliveryState.FAILED)
+            updateEmergencyTransmission(report.id, EmergencyTransmissionState.FAILED)
+            updateError("The emergency could not be queued for BLE delivery.")
+            return false
+        }
+        scheduleAckTimeout(pending)
+        return true
     }
 
     override fun close() {
@@ -351,6 +444,9 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         val messageId: Long,
         val route: RouteRef,
         var attempts: Int,
+        val payload: ByteArray,
+        val kind: ChatMessageKind = ChatMessageKind.CHAT,
+        val emergencyId: String? = null,
         var timeout: Runnable? = null
     )
 
@@ -733,12 +829,25 @@ class BleMessagingManager(context: Context) : AutoCloseable {
             }
         }
 
+        val emergency = EmergencyWireCodec.decode(payload)
+        if (text.startsWith(EmergencyWireCodec.DISCRIMINATOR) && emergency == null) {
+            updateError("A malformed or unsupported emergency report was rejected.")
+            return
+        }
+        val incomingText = if (emergency != null) {
+            emergencyReceiver?.invoke(EmergencyWireCodec.toReceivedReport(emergency, route.peerId), route.peerId)
+            "Emergency report ${emergency.emergencyId} received"
+        } else {
+            text
+        }
         appendMessage(
             ChatMessage(
                 id = BleMessageProtocol.messageIdLabel(messageId),
-                text = text,
+                text = incomingText,
                 isIncoming = true,
-                state = MessageDeliveryState.RECEIVED
+                state = MessageDeliveryState.RECEIVED,
+                kind = if (emergency == null) ChatMessageKind.CHAT else ChatMessageKind.EMERGENCY,
+                emergencyId = emergency?.emergencyId
             )
         )
         sendAcknowledgement(route, messageId)
@@ -748,6 +857,8 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         val pending = pendingMessages.remove(messageId) ?: return
         cancelTimeout(pending)
         updateMessageState(messageId, MessageDeliveryState.DELIVERED)
+        pending.emergencyId?.let { updateEmergencyTransmission(it, EmergencyTransmissionState.TRANSPORT_ACKNOWLEDGED) }
+        pendingEmergencyIds.remove(messageId)
     }
 
     private fun sendAcknowledgement(route: RouteRef, messageId: Long) {
@@ -959,6 +1070,10 @@ class BleMessagingManager(context: Context) : AutoCloseable {
                 } else {
                     pendingMessages.remove(current.messageId)
                     updateMessageState(current.messageId, MessageDeliveryState.FAILED)
+                    current.emergencyId?.let {
+                        pendingEmergencyIds.remove(current.messageId)
+                        updateEmergencyTransmission(it, EmergencyTransmissionState.FAILED)
+                    }
                 }
             } else {
                 pendingMessages.remove(current.messageId)
@@ -970,6 +1085,17 @@ class BleMessagingManager(context: Context) : AutoCloseable {
                         MessageDeliveryState.DISCONNECTED
                     }
                 )
+                current.emergencyId?.let {
+                    pendingEmergencyIds.remove(current.messageId)
+                    updateEmergencyTransmission(
+                        it,
+                        if (routeIsAvailable(current.route)) {
+                            EmergencyTransmissionState.FAILED
+                        } else {
+                            EmergencyTransmissionState.DISCONNECTED
+                        }
+                    )
+                }
             }
         }
         pending.timeout = timeout
@@ -977,14 +1103,11 @@ class BleMessagingManager(context: Context) : AutoCloseable {
     }
 
     private fun resendPending(pending: PendingOutgoingMessage): Boolean {
-        val message = messages.firstOrNull {
-            it.id == BleMessageProtocol.messageIdLabel(pending.messageId)
-        } ?: return false
         return sendFrame(
             route = pending.route,
             type = BleFrameType.MESSAGE,
             messageId = pending.messageId,
-            payload = message.text.toByteArray(StandardCharsets.UTF_8)
+            payload = pending.payload
         )
     }
 
@@ -1010,6 +1133,17 @@ class BleMessagingManager(context: Context) : AutoCloseable {
             ) {
                 cancelTimeout(pending)
                 updateMessageState(pending.messageId, finalState)
+                pending.emergencyId?.let {
+                    updateEmergencyTransmission(
+                        it,
+                        if (finalState == MessageDeliveryState.DISCONNECTED) {
+                            EmergencyTransmissionState.DISCONNECTED
+                        } else {
+                            EmergencyTransmissionState.FAILED
+                        }
+                    )
+                    pendingEmergencyIds.remove(pending.messageId)
+                }
                 iterator.remove()
             }
         }
@@ -1237,6 +1371,17 @@ class BleMessagingManager(context: Context) : AutoCloseable {
             messages.addAll(updated)
             publish(_state.copy(messages = messages.toList()))
         }
+    }
+
+    private fun updateEmergencyTransmission(
+        emergencyId: String,
+        state: EmergencyTransmissionState
+    ) {
+        publish(
+            _state.copy(
+                emergencyTransmissions = _state.emergencyTransmissions + (emergencyId to state)
+            )
+        )
     }
 
     private fun updateError(message: String) {

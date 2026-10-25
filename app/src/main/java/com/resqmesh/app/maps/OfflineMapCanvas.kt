@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.IntSize
 import com.resqmesh.app.data.EmergencyMapMarkerFilter
 import com.resqmesh.app.data.EmergencyReport
 import kotlin.math.max
+import androidx.compose.ui.draw.clipToBounds
 import kotlin.math.min
 
 data class OfflineMapCamera(
@@ -65,6 +66,7 @@ fun OfflineMapCanvas(
     Canvas(
         modifier = modifier
             .fillMaxSize()
+            .clipToBounds()
             .onSizeChanged { size = it }
             .pointerInput(bounds, size, markerReports) {
                 awaitEachGesture {

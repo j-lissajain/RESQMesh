@@ -10,14 +10,18 @@ class LocalEmergencyRepository(context: Context) {
     fun list(): List<EmergencyReport> = loadStoredReports()
 
     fun save(report: EmergencyReport) {
-        val reports = loadStoredReports()
-            .filterNot { it.id == report.id }
-            .toMutableList()
-        reports += report
+        val reports = EmergencyReportMerge.upsert(loadStoredReports(), report)
         val encoded = JSONArray().apply {
             reports.forEach { put(EmergencyReportJsonCodec.encode(it)) }
         }
         preferences.edit().putString(KEY_REPORTS, encoded.toString()).apply()
+    }
+
+    fun updateStatus(reportId: String, status: EmergencyReportStatus): EmergencyReport? {
+        val report = loadStoredReports().firstOrNull { it.id == reportId } ?: return null
+        val updated = report.copy(status = status)
+        save(updated)
+        return updated
     }
 
     private fun loadStoredReports(): List<EmergencyReport> {

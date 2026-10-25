@@ -17,7 +17,9 @@ data class StoredEmergencyReport(
     val createdAtMillis: Long,
     val statusName: String,
     val locationDescription: String?,
-    val location: StoredEmergencyLocation?
+    val location: StoredEmergencyLocation?,
+    val originId: String?,
+    val receivedFromPeerId: String?
 )
 
 object EmergencyReportStorageCodec {
@@ -29,6 +31,8 @@ object EmergencyReportStorageCodec {
         createdAtMillis = report.createdAtMillis,
         statusName = report.status.name,
         locationDescription = report.locationDescription?.trim()?.takeIf { it.isNotBlank() },
+        originId = report.originId?.trim()?.takeIf { it.isNotBlank() },
+        receivedFromPeerId = report.receivedFromPeerId?.trim()?.takeIf { it.isNotBlank() },
         location = report.location?.let {
             StoredEmergencyLocation(
                 latitude = it.latitude,
@@ -68,7 +72,9 @@ object EmergencyReportStorageCodec {
             createdAtMillis = stored.createdAtMillis,
             status = status,
             location = location,
-            locationDescription = stored.locationDescription
+            locationDescription = stored.locationDescription,
+            originId = stored.originId,
+            receivedFromPeerId = stored.receivedFromPeerId
         )
     }
 }

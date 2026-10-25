@@ -86,20 +86,20 @@ fun ProfileSetupScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
         Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF332A13)),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
             shape = RoundedCornerShape(16.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
                     text = "Important: self-declared information",
-                    color = EmergencyAmber,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = "Your name, role, and capabilities are not verified authentication or proof of professional qualifications. Do not treat a selection here as a credential or a trust score.",
-                    color = Color(0xFFE4D9B7),
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
                     style = MaterialTheme.typography.bodyMedium
                 )
             }

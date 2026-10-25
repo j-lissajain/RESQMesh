@@ -94,6 +94,13 @@ fun ResqMeshApp() {
         }
     }
     DisposableEffect(messagingManager) { onDispose { messagingManager.close() } }
+    DisposableEffect(messagingManager, emergencyRepository) {
+        messagingManager.setEmergencyReceiver { report, _ ->
+            emergencyRepository.save(report)
+            reports = emergencyRepository.list()
+        }
+        onDispose { messagingManager.setEmergencyReceiver(null) }
+    }
     DisposableEffect(locationEngine) {
         val remove = locationEngine.addListener { locationState = it }
         onDispose {
@@ -188,6 +195,8 @@ fun ResqMeshApp() {
                     EmergencyReportingSection(
                         repository = emergencyRepository,
                         locationEngine = locationEngine,
+                        messagingManager = messagingManager,
+                        reportsSnapshot = reports,
                         mapLocation = selectedMapLocation,
                         onChooseOnMap = { navController.navigate(Routes.LOCATION_PICKER) },
                         onClearMapSelection = { selectedMapLocation = null },

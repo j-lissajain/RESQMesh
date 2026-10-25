@@ -80,7 +80,7 @@ fun HomeScreen(
                 Text("Ready when you are", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    "Create a local emergency report or inspect the bundled Nagpur map. Reports stay on this device in this milestone.",
+                    "Create a local emergency report or inspect the bundled Nagpur map. Reports remain local unless you explicitly send one to a connected peer.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(12.dp))

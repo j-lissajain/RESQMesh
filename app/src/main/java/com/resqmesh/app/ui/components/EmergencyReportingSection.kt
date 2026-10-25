@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -48,6 +49,9 @@ import com.resqmesh.app.data.EmergencySeverity
 import com.resqmesh.app.data.EmergencyType
 import com.resqmesh.app.data.EmergencyReportValidation
 import com.resqmesh.app.data.LocalEmergencyRepository
+import com.resqmesh.app.bluetooth.BleMessagingManager
+import com.resqmesh.app.bluetooth.BleConnectionStatus
+import com.resqmesh.app.bluetooth.EmergencyTransmissionState
 import com.resqmesh.app.location.DeviceLocationReading
 import com.resqmesh.app.location.LocationEngineState
 import com.resqmesh.app.location.LocationPermissions
@@ -64,6 +68,8 @@ import kotlinx.coroutines.delay
 fun EmergencyReportingSection(
     repository: LocalEmergencyRepository,
     locationEngine: OfflineLocationEngine,
+    messagingManager: BleMessagingManager,
+    reportsSnapshot: List<EmergencyReport> = repository.list(),
     mapLocation: EmergencyLocation? = null,
     onChooseOnMap: () -> Unit = {},
     onClearMapSelection: () -> Unit = {},
@@ -72,14 +78,34 @@ fun EmergencyReportingSection(
 ) {
     val context = LocalContext.current
     var locationState by remember { mutableStateOf(locationEngine.state) }
-    var reports by remember { mutableStateOf(repository.list()) }
-    var showCreateDialog by remember { mutableStateOf(false) }
+    var reports by remember(reportsSnapshot) { mutableStateOf(reportsSnapshot) }
+    var showCreateDialog by rememberSaveable { mutableStateOf(false) }
     var selectedReport by remember { mutableStateOf<EmergencyReport?>(null) }
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var messagingState by remember { mutableStateOf(messagingManager.state) }
 
     DisposableEffect(locationEngine) {
         val removeListener = locationEngine.addListener { updatedState -> locationState = updatedState }
         onDispose(removeListener)
+    }
+
+    DisposableEffect(messagingManager) {
+        val removeListener = messagingManager.addListener { messagingState = it }
+        onDispose(removeListener)
+    }
+
+    LaunchedEffect(messagingState.emergencyTransmissions) {
+        messagingState.emergencyTransmissions.forEach { (emergencyId, transmissionState) ->
+            val status = when (transmissionState) {
+                EmergencyTransmissionState.TRANSPORT_ACKNOWLEDGED -> EmergencyReportStatus.TRANSPORT_ACKNOWLEDGED
+                EmergencyTransmissionState.FAILED,
+                EmergencyTransmissionState.DISCONNECTED -> EmergencyReportStatus.TRANSMISSION_FAILED
+                else -> null
+            }
+            if (status != null) repository.updateStatus(emergencyId, status)
+        }
+        reports = repository.list()
+        onReportsChanged(reports)
     }
 
     LaunchedEffect(locationState.reading?.timestampMillis, locationState.isRefreshing) {
@@ -167,7 +193,16 @@ fun EmergencyReportingSection(
                     reports.forEach { report ->
                         ReportSummaryCard(
                             report = report,
-                            onClick = { selectedReport = report }
+                            transmissionState = messagingState.emergencyTransmissions[report.id],
+                            canSend = messagingState.connectedPeerId != null &&
+                                messagingState.connectionStatus == BleConnectionStatus.CONNECTED,
+                            onClick = { selectedReport = report },
+                            onSend = {
+                                val sent = messagingManager.sendEmergency(report)
+                                if (!sent && messagingState.connectedPeerId == null) {
+                                    selectedReport = report
+                                }
+                            }
                         )
                     }
                 }
@@ -296,7 +331,10 @@ private fun LocationStatusCard(
 @Composable
 private fun ReportSummaryCard(
     report: EmergencyReport,
-    onClick: () -> Unit
+    transmissionState: EmergencyTransmissionState?,
+    canSend: Boolean,
+    onClick: () -> Unit,
+    onSend: () -> Unit
 ) {
     Card(
         onClick = onClick,
@@ -334,6 +372,57 @@ private fun ReportSummaryCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall
             )
+            report.receivedFromPeerId?.let {
+                Text(
+                    text = "Received from nearby peer",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+            if (report.receivedFromPeerId == null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = onClick, modifier = Modifier.weight(1f)) {
+                        Text("Details")
+                    }
+                    Button(
+                        onClick = onSend,
+                        enabled = canSend && transmissionState != EmergencyTransmissionState.SENDING,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = EmergencyAmber,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
+                    ) {
+                        Text(
+                            when (transmissionState) {
+                                EmergencyTransmissionState.SENDING -> "Sending…"
+                                EmergencyTransmissionState.TRANSPORT_ACKNOWLEDGED -> "Acknowledged"
+                                EmergencyTransmissionState.FAILED,
+                                EmergencyTransmissionState.DISCONNECTED -> "Retry"
+                                else -> "Send"
+                            }
+                        )
+                    }
+                }
+                transmissionState?.let { state ->
+                    Text(
+                        text = when (state) {
+                            EmergencyTransmissionState.READY_TO_SEND -> "Ready to send when a peer is connected."
+                            EmergencyTransmissionState.SENDING -> "Sending over the active BLE connection…"
+                            EmergencyTransmissionState.TRANSPORT_ACKNOWLEDGED -> "Transport acknowledged. This does not mean a responder accepted it."
+                            EmergencyTransmissionState.FAILED -> "Transmission failed. The report remains saved locally."
+                            EmergencyTransmissionState.DISCONNECTED -> "Connection lost. Retry when a peer reconnects."
+                        },
+                        color = if (state == EmergencyTransmissionState.TRANSPORT_ACKNOWLEDGED) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
         }
     }
 }
@@ -353,14 +442,17 @@ private fun CreateEmergencyDialog(
     onDismiss: () -> Unit,
     onSave: (EmergencyReport) -> Unit
 ) {
-    var type by remember { mutableStateOf(EmergencyType.MEDICAL) }
-    var severity by remember { mutableStateOf(EmergencySeverity.HIGH) }
-    var description by remember { mutableStateOf("") }
-    var locationDescription by remember { mutableStateOf("") }
-    var latitude by remember { mutableStateOf("") }
-    var longitude by remember { mutableStateOf("") }
-    var locationChoice by remember {
-        mutableStateOf(if (locationState.reading != null) LocationChoice.CURRENT else LocationChoice.NONE)
+    var type by rememberSaveable { mutableStateOf(EmergencyType.MEDICAL) }
+    var severity by rememberSaveable { mutableStateOf(EmergencySeverity.HIGH) }
+    var description by rememberSaveable { mutableStateOf("") }
+    var locationDescription by rememberSaveable { mutableStateOf("") }
+    var latitude by rememberSaveable { mutableStateOf("") }
+    var longitude by rememberSaveable { mutableStateOf("") }
+    var locationChoice by rememberSaveable {
+        mutableStateOf(
+            if (locationState.reading != null) LocationChoice.CURRENT
+            else LocationChoice.NONE
+        )
     }
     var validationError by remember { mutableStateOf<String?>(null) }
 
@@ -418,8 +510,14 @@ private fun CreateEmergencyDialog(
                     enabled = locationState.reading != null,
                     label = {
                         Text(
-                            if (locationState.reading == null) "Current device location unavailable"
-                            else "Use current device location"
+                            if (locationState.reading == null) {
+                                "Current device location unavailable"
+                            } else {
+                                val reading = locationState.reading!!
+                                "Use current device location\n" +
+                                        "Lat: ${formatCoordinate(reading.latitude)}, " +
+                                        "Lon: ${formatCoordinate(reading.longitude)}"
+                            }
                         )
                     },
                     modifier = Modifier.fillMaxWidth()

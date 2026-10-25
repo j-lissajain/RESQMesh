@@ -251,7 +251,7 @@ fun OfflineMapPickerDialog(
                         onReportClick = {},
                         modifier = Modifier.fillMaxWidth().height(300.dp)
                     )
-                    Text(text = "+", color = Color(0xFFD53F3F), style = MaterialTheme.typography.headlineMedium)
+                    Text(text = "+", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.headlineMedium)
                 }
                 Text(
                     text = "Selected: ${"%.6f".format(Locale.US, camera.latitude)}, ${"%.6f".format(Locale.US, camera.longitude)}",
@@ -295,6 +295,8 @@ fun OfflineMapScreen(
     var searchQuery by rememberSaveable { mutableStateOf("") }
     val camera = OfflineMapCamera(latitude, longitude, zoom)
     val searchResults = OfflinePlaceSearch.search(dataset?.places.orEmpty(), searchQuery)
+    var searchedLatitude by rememberSaveable { mutableStateOf<Double?>(null) }
+    var searchedLongitude by rememberSaveable { mutableStateOf<Double?>(null) }
 
     Column(
         modifier = Modifier
@@ -334,6 +336,8 @@ fun OfflineMapScreen(
                                 latitude = place.latitude
                                 longitude = place.longitude
                                 zoom = 5f
+                                searchedLatitude = place.latitude
+                                searchedLongitude = place.longitude
                                 searchQuery = place.name
                             },
                             modifier = Modifier.fillMaxWidth()
@@ -364,8 +368,8 @@ fun OfflineMapScreen(
                     longitude = it.longitude
                     zoom = it.zoom
                 },
-                selectedLatitude = null,
-                selectedLongitude = null,
+                selectedLatitude = searchedLatitude,
+                selectedLongitude = searchedLongitude,
                 currentLatitude = locationState.reading?.latitude,
                 currentLongitude = locationState.reading?.longitude,
                 reports = reports,
@@ -486,7 +490,7 @@ fun OfflineLocationPickerScreen(
                 maxZoom = 20f,
                 modifier = Modifier.fillMaxSize()
             )
-            Text("+", color = Color(0xFFD53F3F), style = MaterialTheme.typography.headlineMedium)
+            Text("+", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.headlineMedium)
             Column(
                 modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)

@@ -30,7 +30,10 @@ enum class EmergencySeverity(val label: String) {
 }
 
 enum class EmergencyReportStatus(val label: String) {
-    LOCAL_ONLY("Saved locally — not transmitted");
+    LOCAL_ONLY("Saved locally — not transmitted"),
+    TRANSPORT_ACKNOWLEDGED("Transport acknowledged — not accepted"),
+    TRANSMISSION_FAILED("Transmission failed — retry available"),
+    RECEIVED_FROM_PEER("Received from another device — local copy");
 
     companion object {
         fun fromStoredValue(value: String?): EmergencyReportStatus? =
@@ -66,5 +69,7 @@ data class EmergencyReport(
     val createdAtMillis: Long,
     val status: EmergencyReportStatus = EmergencyReportStatus.LOCAL_ONLY,
     val location: EmergencyLocation? = null,
-    val locationDescription: String? = null
+    val locationDescription: String? = null,
+    val originId: String? = null,
+    val receivedFromPeerId: String? = null
 )

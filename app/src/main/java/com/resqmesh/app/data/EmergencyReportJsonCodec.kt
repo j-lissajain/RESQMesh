@@ -20,6 +20,10 @@ object EmergencyReportJsonCodec {
                     locationDescription = json.optString(KEY_LOCATION_DESCRIPTION)
                         .trim()
                         .takeIf { it.isNotBlank() },
+                    originId = json.optString(KEY_ORIGIN_ID).trim().takeIf { it.isNotBlank() },
+                    receivedFromPeerId = json.optString(KEY_RECEIVED_FROM_PEER_ID)
+                        .trim()
+                        .takeIf { it.isNotBlank() },
                     location = json.optJSONObject(KEY_LOCATION)?.let { location ->
                         StoredEmergencyLocation(
                             latitude = location.optDouble(KEY_LATITUDE, Double.NaN),
@@ -47,6 +51,8 @@ object EmergencyReportJsonCodec {
         put(KEY_CREATED_AT, createdAtMillis)
         put(KEY_STATUS, statusName)
         locationDescription?.let { put(KEY_LOCATION_DESCRIPTION, it) }
+        originId?.let { put(KEY_ORIGIN_ID, it) }
+        receivedFromPeerId?.let { put(KEY_RECEIVED_FROM_PEER_ID, it) }
         location?.let { value ->
             put(KEY_LOCATION, JSONObject().apply {
                 put(KEY_LATITUDE, value.latitude)
@@ -66,6 +72,8 @@ object EmergencyReportJsonCodec {
     private const val KEY_CREATED_AT = "created_at"
     private const val KEY_STATUS = "status"
     private const val KEY_LOCATION_DESCRIPTION = "location_description"
+    private const val KEY_ORIGIN_ID = "origin_id"
+    private const val KEY_RECEIVED_FROM_PEER_ID = "received_from_peer_id"
     private const val KEY_LOCATION = "location"
     private const val KEY_LATITUDE = "latitude"
     private const val KEY_LONGITUDE = "longitude"

@@ -30,7 +30,9 @@ class EmergencyReportJsonCodecTest {
                 timestampMillis = 90L,
                 source = EmergencyLocationSource.MAP,
                 isVerified = false
-            )
+            ),
+            originId = "origin-a",
+            receivedFromPeerId = "peer-b"
         )
 
         val restored = EmergencyReportStorageCodec.decode(
@@ -41,6 +43,8 @@ class EmergencyReportJsonCodecTest {
         assertEquals("Near the main entrance", restored?.locationDescription)
         assertEquals(EmergencyLocationSource.MAP, restored?.location?.source)
         assertFalse(restored?.location?.isVerified == true)
+        assertEquals("origin-a", restored?.originId)
+        assertEquals("peer-b", restored?.receivedFromPeerId)
         assertEquals("Saved locally — not transmitted", restored?.status?.label)
     }
 }

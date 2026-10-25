@@ -145,6 +145,7 @@ fun DashboardScreen(
         EmergencyReportingSection(
             repository = emergencyRepository,
             locationEngine = locationEngine,
+            messagingManager = messagingManager,
             modifier = Modifier.fillMaxWidth()
         )
 
