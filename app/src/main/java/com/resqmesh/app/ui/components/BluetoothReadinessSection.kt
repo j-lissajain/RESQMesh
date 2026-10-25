@@ -75,7 +75,7 @@ fun BluetoothReadinessSection(modifier: Modifier = Modifier) {
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Device checks only — no BLE communication yet",
+                        text = "Device checks for BLE discovery and advertising",
                         color = Color(0xFF9DB0BB),
                         style = MaterialTheme.typography.bodySmall
                     )

@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.resqmesh.app.data.LocalProfile
+import com.resqmesh.app.ui.components.BleDiscoverySection
 import com.resqmesh.app.ui.components.BluetoothReadinessSection
 import com.resqmesh.app.ui.theme.EmergencyAmber
 import com.resqmesh.app.ui.theme.EmergencyBackground
@@ -112,6 +113,9 @@ fun DashboardScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
         BluetoothReadinessSection(modifier = Modifier.fillMaxWidth())
+
+        Spacer(modifier = Modifier.height(16.dp))
+        BleDiscoverySection(modifier = Modifier.fillMaxWidth())
 
         Spacer(modifier = Modifier.height(24.dp))
         Text(

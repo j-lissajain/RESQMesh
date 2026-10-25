@@ -66,7 +66,7 @@ class BluetoothReadinessChecker(private val context: Context) {
             !bleSupported || adapter == null -> false
             !canInspectAdapter -> null
             else -> try {
-                adapter.isMultipleAdvertisementSupported
+                adapter.bluetoothLeAdvertiser != null
             } catch (_: SecurityException) {
                 null
             }
@@ -102,6 +102,6 @@ class BluetoothReadinessChecker(private val context: Context) {
         bluetoothEnabled == null -> "Bluetooth status could not be checked yet. Refresh after granting permissions."
         bleAdvertisingSupported == false -> "BLE is available, but this phone cannot advertise as a BLE peripheral."
         bleAdvertisingSupported == null -> "BLE advertising support could not be checked yet."
-        else -> "Ready for a future BLE connection flow. Scanning and advertising are not implemented yet."
+        else -> "Ready for BLE discovery. Scanning and advertising can be started from the dashboard."
     }
 }
