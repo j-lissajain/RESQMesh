@@ -73,14 +73,14 @@ fun ProfileSetupScreen(
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = if (existingProfile == null) "Create your local profile" else "Edit your local profile",
-            color = Color.White,
+            color = MaterialTheme.colorScheme.onSurface,
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.ExtraBold
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = "This helps nearby people understand how you want to participate in the prototype.",
-            color = Color(0xFFB8C8D2),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyLarge
         )
 
@@ -127,14 +127,14 @@ fun ProfileSetupScreen(
         Spacer(modifier = Modifier.height(24.dp))
         Text(
             text = "Choose a role",
-            color = Color.White,
+            color = MaterialTheme.colorScheme.onSurface,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = "This is a local, self-described role and is not verified.",
-            color = Color(0xFF8EA2AE),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall
         )
         Spacer(modifier = Modifier.height(10.dp))
@@ -189,7 +189,7 @@ fun ProfileSetupScreen(
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(
                 containerColor = EmergencyAmber,
-                contentColor = Color(0xFF1B1300)
+                contentColor = MaterialTheme.colorScheme.onPrimary
             ),
             shape = RoundedCornerShape(14.dp),
             contentPadding = PaddingValues(vertical = 16.dp)
@@ -203,7 +203,7 @@ fun ProfileSetupScreen(
         Spacer(modifier = Modifier.height(12.dp))
         Text(
             text = "Only this device's local profile is saved in this milestone. No account or cloud sync is used.",
-            color = Color(0xFF8295A1),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall
         )
     }

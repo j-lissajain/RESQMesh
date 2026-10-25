@@ -49,7 +49,7 @@ fun WelcomeScreen(
             Text(
                 text = "LOCAL-FIRST EMERGENCY NETWORK",
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                color = Color(0xFF1B1300),
+                color = MaterialTheme.colorScheme.onPrimary,
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -59,14 +59,14 @@ fun WelcomeScreen(
 
         Text(
             text = "RESQMesh",
-            color = Color.White,
+            color = MaterialTheme.colorScheme.onSurface,
             style = MaterialTheme.typography.displaySmall,
             fontWeight = FontWeight.ExtraBold
         )
         Spacer(modifier = Modifier.height(12.dp))
         Text(
             text = "Community-powered emergency coordination when infrastructure and connectivity fail.",
-            color = Color(0xFFD5E2EA),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold
         )
@@ -80,14 +80,14 @@ fun WelcomeScreen(
             Column(modifier = Modifier.padding(20.dp)) {
                 Text(
                     text = "Start with a local profile",
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = "No account or internet connection is required for this prototype. Your self-declared profile stays on this device.",
-                    color = Color(0xFFB8C8D2),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyLarge
                 )
             }
@@ -100,7 +100,7 @@ fun WelcomeScreen(
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(
                 containerColor = EmergencyAmber,
-                contentColor = Color(0xFF1B1300)
+                contentColor = MaterialTheme.colorScheme.onPrimary
             ),
             shape = RoundedCornerShape(14.dp),
             contentPadding = PaddingValues(vertical = 16.dp)
@@ -115,7 +115,7 @@ fun WelcomeScreen(
         Spacer(modifier = Modifier.height(16.dp))
         Text(
             text = "Built for coordination, not credential verification. Share only what you are comfortable declaring locally.",
-            color = Color(0xFF8295A1),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall
         )
     }

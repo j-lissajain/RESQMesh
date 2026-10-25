@@ -53,59 +53,33 @@ import com.resqmesh.app.location.LocationEngineState
 import com.resqmesh.app.location.LocationPermissions
 import com.resqmesh.app.location.LocationStatus
 import com.resqmesh.app.location.OfflineLocationEngine
-import com.resqmesh.app.maps.NagpurMapData
-import com.resqmesh.app.maps.OfflineMapCamera
-import com.resqmesh.app.maps.OfflineMapDataset
-import com.resqmesh.app.maps.OfflineMapRepository
 import com.resqmesh.app.ui.theme.EmergencyAmber
 import com.resqmesh.app.ui.theme.EmergencySurface
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 @Composable
 fun EmergencyReportingSection(
     repository: LocalEmergencyRepository,
+    locationEngine: OfflineLocationEngine,
+    mapLocation: EmergencyLocation? = null,
+    onChooseOnMap: () -> Unit = {},
+    onClearMapSelection: () -> Unit = {},
+    onReportsChanged: (List<EmergencyReport>) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val locationEngine = remember { OfflineLocationEngine(context.applicationContext) }
     var locationState by remember { mutableStateOf(locationEngine.state) }
     var reports by remember { mutableStateOf(repository.list()) }
     var showCreateDialog by remember { mutableStateOf(false) }
-    var showMapPicker by remember { mutableStateOf(false) }
     var selectedReport by remember { mutableStateOf<EmergencyReport?>(null) }
-    var selectedMapLocation by remember { mutableStateOf<EmergencyLocation?>(null) }
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    val mapRepository = remember { OfflineMapRepository(context.applicationContext) }
-    var mapDataset by remember { mutableStateOf<OfflineMapDataset?>(null) }
-    val mapDatasetDescription = remember { mapRepository.datasetDescription() }
-    var mapCamera by remember {
-        mutableStateOf(
-            OfflineMapCamera(
-                latitude = NagpurMapData.centerLatitude,
-                longitude = NagpurMapData.centerLongitude,
-                zoom = 1f
-            )
-        )
-    }
-    var mapSearchQuery by remember { mutableStateOf("") }
-
-    LaunchedEffect(mapRepository) {
-        mapDataset = withContext(Dispatchers.Default) { mapRepository.loadDataset() }
-    }
 
     DisposableEffect(locationEngine) {
-        val removeListener = locationEngine.addListener { updatedState ->
-            locationState = updatedState
-        }
-        onDispose {
-            removeListener()
-            locationEngine.close()
-        }
+        val removeListener = locationEngine.addListener { updatedState -> locationState = updatedState }
+        onDispose(removeListener)
     }
 
     LaunchedEffect(locationState.reading?.timestampMillis, locationState.isRefreshing) {
@@ -133,17 +107,21 @@ fun EmergencyReportingSection(
         colors = CardDefaults.cardColors(containerColor = EmergencySurface),
         shape = RoundedCornerShape(18.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
             Text(
                 text = "Emergency reports",
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "Saved on this device only. Reports are not transmitted or broadcast in this batch.",
-                color = Color(0xFF9DB0BB),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall
             )
 
@@ -161,41 +139,15 @@ fun EmergencyReportingSection(
                 onClear = locationEngine::clear
             )
 
-            Spacer(modifier = Modifier.height(14.dp))
-            OfflineNagpurMapCard(
-                dataset = mapDataset,
-                datasetDescription = mapDatasetDescription,
-                camera = mapCamera,
-                onCameraChange = { mapCamera = it },
-                searchQuery = mapSearchQuery,
-                onSearchQueryChange = { mapSearchQuery = it },
-                locationState = locationState,
-                reports = reports,
-                onCenterOnLocation = {
-                    val reading = locationState.reading
-                    if (reading != null && NagpurMapData.isCovered(reading.latitude, reading.longitude)) {
-                        mapCamera = mapCamera.copy(
-                            latitude = reading.latitude,
-                            longitude = reading.longitude,
-                            zoom = 3f
-                        )
-                    }
-                },
-                onOpenPicker = { showMapPicker = true },
-                onReportClick = { selectedReport = it },
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(14.dp))
             Button(
                 onClick = {
-                    selectedMapLocation = null
+                    onClearMapSelection()
                     showCreateDialog = true
                 },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = EmergencyAmber,
-                    contentColor = Color(0xFF1B1300)
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 ),
                 shape = RoundedCornerShape(12.dp),
                 contentPadding = PaddingValues(vertical = 13.dp)
@@ -207,7 +159,7 @@ fun EmergencyReportingSection(
             if (reports.isEmpty()) {
                 Text(
                     text = "No locally saved emergencies yet.",
-                    color = Color(0xFFB8C8D2),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
             } else {
@@ -226,30 +178,18 @@ fun EmergencyReportingSection(
     if (showCreateDialog) {
         CreateEmergencyDialog(
             locationState = locationState,
-            mapLocation = selectedMapLocation,
-            onChooseOnMap = { showMapPicker = true },
+            mapLocation = mapLocation,
+            onChooseOnMap = onChooseOnMap,
             onDismiss = { showCreateDialog = false },
             onSave = { report ->
                 repository.save(report)
                 reports = repository.list()
+                onReportsChanged(reports)
                 showCreateDialog = false
             }
         )
     }
 
-    if (showMapPicker) {
-        OfflineMapPickerDialog(
-            dataset = mapDataset,
-            initialCamera = mapCamera,
-            locationReading = locationState.reading,
-            onDismiss = { showMapPicker = false },
-            onConfirm = { latitude, longitude ->
-                selectedMapLocation = NagpurMapData.selectedLocation(latitude, longitude, System.currentTimeMillis())
-                mapCamera = mapCamera.copy(latitude = latitude, longitude = longitude, zoom = maxOf(mapCamera.zoom, 2f))
-                showMapPicker = false
-            }
-        )
-    }
 
     selectedReport?.let { report ->
         ReportDetailsDialog(
@@ -267,7 +207,7 @@ private fun LocationStatusCard(
     onClear: () -> Unit
 ) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF17333B)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         shape = RoundedCornerShape(14.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -277,7 +217,7 @@ private fun LocationStatusCard(
             ) {
                 Text(
                     text = "Offline location",
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold
                 )
@@ -293,32 +233,32 @@ private fun LocationStatusCard(
             if (reading == null) {
                 Text(
                     text = state.message,
-                    color = Color(0xFFB8C8D2),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
             } else {
                 Text(
                     text = "${formatCoordinate(reading.latitude)}, ${formatCoordinate(reading.longitude)}",
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = "Accuracy: ${reading.accuracyMeters?.let { "%.1f m".format(it) } ?: "not reported"} · Age: ${formatAge(nowMillis - reading.timestampMillis)}",
-                    color = Color(0xFFB8C8D2),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
                 Text(
                     text = "Source: ${reading.source.label}${if (!reading.precisePermission) " · approximate permission" else ""}",
-                    color = Color(0xFFB8C8D2),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
             }
             Spacer(modifier = Modifier.height(5.dp))
             Text(
                 text = state.message,
-                color = Color(0xFFD5E2EA),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall
             )
             Spacer(modifier = Modifier.height(10.dp))
@@ -332,7 +272,7 @@ private fun LocationStatusCard(
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = EmergencyAmber,
-                        contentColor = Color(0xFF1B1300)
+                        contentColor = MaterialTheme.colorScheme.onPrimary
                     ),
                     shape = RoundedCornerShape(10.dp),
                     contentPadding = PaddingValues(vertical = 10.dp)
@@ -360,7 +300,7 @@ private fun ReportSummaryCard(
 ) {
     Card(
         onClick = onClick,
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF12232D)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -370,7 +310,7 @@ private fun ReportSummaryCard(
             ) {
                 Text(
                     text = report.type.label,
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold
                 )
@@ -384,14 +324,14 @@ private fun ReportSummaryCard(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = report.description,
-                color = Color(0xFFD5E2EA),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 2
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "${report.status.label} · ${formatTimestamp(report.createdAtMillis)}",
-                color = Color(0xFF9DB0BB),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall
             )
         }
@@ -528,14 +468,14 @@ private fun CreateEmergencyDialog(
                     }
                     Text(
                         text = "Manual coordinates are stored as unverified and are not treated as device location.",
-                        color = Color(0xFF9DB0BB),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
                 if (locationChoice == LocationChoice.MAP && mapLocation != null) {
                     Text(
                         text = "Map-selected coordinates are stored as manually selected and unverified.",
-                        color = Color(0xFF9DB0BB),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
@@ -595,7 +535,7 @@ private fun CreateEmergencyDialog(
                 },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = EmergencyAmber,
-                    contentColor = Color(0xFF1B1300)
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 )
             ) {
                 Text(text = "Save locally", fontWeight = FontWeight.Bold)
@@ -670,11 +610,12 @@ private fun locationStatusLabel(status: LocationStatus): String = when (status) 
     LocationStatus.UNAVAILABLE -> "Unavailable"
 }
 
+@Composable
 private fun locationStatusColor(status: LocationStatus): Color = when (status) {
-    LocationStatus.FRESH -> Color(0xFF78D6D0)
+    LocationStatus.FRESH -> MaterialTheme.colorScheme.primary
     LocationStatus.ACQUIRING -> EmergencyAmber
     LocationStatus.STALE, LocationStatus.LOW_ACCURACY -> EmergencyAmber
-    LocationStatus.PERMISSION_REQUIRED, LocationStatus.UNAVAILABLE -> Color(0xFFFFA08A)
+    LocationStatus.PERMISSION_REQUIRED, LocationStatus.UNAVAILABLE -> MaterialTheme.colorScheme.error
 }
 
 private fun formatAge(ageMillis: Long): String {

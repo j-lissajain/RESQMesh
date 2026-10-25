@@ -69,14 +69,14 @@ fun BluetoothReadinessSection(modifier: Modifier = Modifier) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Bluetooth readiness",
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "Device checks for BLE discovery and advertising",
-                        color = Color(0xFF9DB0BB),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
@@ -110,7 +110,7 @@ fun BluetoothReadinessSection(modifier: Modifier = Modifier) {
             Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = readiness.guidance,
-                color = Color(0xFFD5E2EA),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall
             )
 
@@ -124,7 +124,7 @@ fun BluetoothReadinessSection(modifier: Modifier = Modifier) {
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = EmergencyAmber,
-                        contentColor = Color(0xFF1B1300)
+                        contentColor = MaterialTheme.colorScheme.onPrimary
                     ),
                     shape = RoundedCornerShape(12.dp),
                     contentPadding = PaddingValues(vertical = 12.dp)
@@ -204,7 +204,7 @@ private fun ReadinessCell(
     Column(modifier = modifier) {
         Text(
             text = item.label,
-            color = Color(0xFF9DB0BB),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.labelSmall
         )
         Text(
@@ -228,8 +228,9 @@ private fun enabledStatus(enabled: Boolean?): String = when (enabled) {
     null -> "Unknown"
 }
 
+@Composable
 private fun readinessColor(value: String): Color = when (value) {
-    "Supported", "On", "Granted" -> Color(0xFF78D6D0)
+    "Supported", "On", "Granted" -> MaterialTheme.colorScheme.primary
     "Unknown" -> EmergencyAmber
-    else -> Color(0xFFFFA08A)
+    else -> MaterialTheme.colorScheme.error
 }

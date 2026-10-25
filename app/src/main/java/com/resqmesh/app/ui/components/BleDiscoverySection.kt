@@ -109,14 +109,14 @@ fun BleDiscoverySection(
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = "Nearby RESQMesh Devices",
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "Actual BLE advertisements only. No profile information is broadcast.",
-                color = Color(0xFF9DB0BB),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall
             )
 
@@ -131,7 +131,7 @@ fun BleDiscoverySection(
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = EmergencyAmber,
-                        contentColor = Color(0xFF1B1300)
+                        contentColor = MaterialTheme.colorScheme.onPrimary
                     ),
                     shape = RoundedCornerShape(12.dp),
                     contentPadding = PaddingValues(vertical = 12.dp)
@@ -155,7 +155,7 @@ fun BleDiscoverySection(
             Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = state.statusMessage,
-                color = if (state.isActive) Color(0xFF78D6D0) else EmergencyAmber,
+                color = if (state.isActive) MaterialTheme.colorScheme.primary else EmergencyAmber,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -164,7 +164,7 @@ fun BleDiscoverySection(
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = error,
-                    color = Color(0xFFFFA08A),
+                    color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -177,7 +177,7 @@ fun BleDiscoverySection(
                     } else {
                         "No peers discovered in this session."
                     },
-                    color = Color(0xFFB8C8D2),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
             } else {
@@ -226,13 +226,13 @@ private fun PeerRow(
 ) {
     Card(
         onClick = onSelect,
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF17333B)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(
                 text = "Anonymous peer $anonymousId",
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -242,21 +242,21 @@ private fun PeerRow(
                     selected -> "Selected"
                     else -> "Tap to select"
                 },
-                color = if (connected) Color(0xFF78D6D0) else EmergencyAmber,
+                color = if (connected) MaterialTheme.colorScheme.primary else EmergencyAmber,
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "Last seen at $lastSeen",
-                color = Color(0xFFB8C8D2),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall
             )
             Text(
                 text = rssi?.let {
                     "RSSI: $it dBm (signal strength, not an accurate distance)"
                 } ?: "RSSI unavailable",
-                color = Color(0xFFB8C8D2),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall
             )
             Spacer(modifier = Modifier.height(8.dp))
@@ -282,7 +282,7 @@ private fun MessagingPanel(
     Spacer(modifier = Modifier.height(14.dp))
     Text(
         text = "BLE messages",
-        color = Color.White,
+        color = MaterialTheme.colorScheme.onSurface,
         style = MaterialTheme.typography.titleSmall,
         fontWeight = FontWeight.Bold
     )
@@ -295,16 +295,16 @@ private fun MessagingPanel(
             BleConnectionStatus.DISCONNECTED -> "Select a peer and connect to exchange messages"
         },
         color = if (state.connectionStatus == BleConnectionStatus.CONNECTED) {
-            Color(0xFF78D6D0)
+            MaterialTheme.colorScheme.primary
         } else {
-            Color(0xFFB8C8D2)
+            MaterialTheme.colorScheme.onSurfaceVariant
         },
         style = MaterialTheme.typography.bodySmall
     )
     val error = state.error
     if (error != null) {
         Spacer(modifier = Modifier.height(4.dp))
-        Text(text = error, color = Color(0xFFFFA08A), style = MaterialTheme.typography.bodySmall)
+        Text(text = error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
     }
 
     if (state.messages.isNotEmpty()) {
@@ -313,7 +313,7 @@ private fun MessagingPanel(
             state.messages.takeLast(8).forEach { message ->
                 Text(
                     text = "${if (message.isIncoming) "Peer" else "You"}: ${message.text} · ${message.state.label}",
-                    color = Color(0xFFD5E2EA),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -341,7 +341,7 @@ private fun MessagingPanel(
         modifier = Modifier.fillMaxWidth(),
         colors = ButtonDefaults.buttonColors(
             containerColor = EmergencyAmber,
-            contentColor = Color(0xFF1B1300)
+            contentColor = MaterialTheme.colorScheme.onPrimary
         ),
         shape = RoundedCornerShape(10.dp)
     ) {

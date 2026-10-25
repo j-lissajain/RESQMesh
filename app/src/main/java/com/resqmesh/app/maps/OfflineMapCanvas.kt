@@ -8,6 +8,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -46,6 +47,7 @@ fun OfflineMapCanvas(
     currentLongitude: Double?,
     reports: List<EmergencyReport>,
     onReportClick: (EmergencyReport) -> Unit,
+    maxZoom: Float = 20f,
     modifier: Modifier = Modifier
 ) {
     var size by remember { mutableStateOf(IntSize.Zero) }
@@ -84,15 +86,27 @@ fun OfflineMapCanvas(
                                 (pan != Offset.Zero || zoomChange != 1f)
                             ) {
                                 moved = true
-                                val nextZoom = (interactiveCamera.zoom * zoomChange).coerceIn(1f, 8f)
+                                val centroid = event.calculateCentroid(useCurrent = true)
+                                val oldPixelsPerLongitude = size.width /
+                                    (bounds.maxLongitude - bounds.minLongitude) * interactiveCamera.zoom
+                                val oldPixelsPerLatitude = size.height /
+                                    (bounds.maxLatitude - bounds.minLatitude) * interactiveCamera.zoom
+                                val nextZoom = (interactiveCamera.zoom * zoomChange).coerceIn(1f, maxZoom)
                                 val pixelsPerLongitude = size.width /
                                     (bounds.maxLongitude - bounds.minLongitude) * nextZoom
                                 val pixelsPerLatitude = size.height /
                                     (bounds.maxLatitude - bounds.minLatitude) * nextZoom
+                                val focalLatitude = interactiveCamera.latitude -
+                                    (centroid.y - size.height / 2f) / oldPixelsPerLatitude
+                                val focalLongitude = interactiveCamera.longitude +
+                                    (centroid.x - size.width / 2f) / oldPixelsPerLongitude
+                                val nextCentroid = centroid + pan
                                 interactiveCamera = interactiveCamera.copy(
-                                    latitude = (interactiveCamera.latitude + pan.y / pixelsPerLatitude)
+                                    latitude = (focalLatitude +
+                                        (nextCentroid.y - size.height / 2f) / pixelsPerLatitude)
                                         .coerceIn(bounds.minLatitude, bounds.maxLatitude),
-                                    longitude = (interactiveCamera.longitude - pan.x / pixelsPerLongitude)
+                                    longitude = (focalLongitude -
+                                        (nextCentroid.x - size.width / 2f) / pixelsPerLongitude)
                                         .coerceIn(bounds.minLongitude, bounds.maxLongitude),
                                     zoom = nextZoom
                                 )
@@ -127,7 +141,8 @@ fun OfflineMapCanvas(
             selectedLongitude = selectedLongitude,
             currentLatitude = currentLatitude,
             currentLongitude = currentLongitude,
-            reports = markerReports
+            reports = markerReports,
+            isGestureActive = mapGestureActive
         )
     }
 }
@@ -142,7 +157,8 @@ private fun drawMap(
     selectedLongitude: Double?,
     currentLatitude: Double?,
     currentLongitude: Double?,
-    reports: List<EmergencyReport>
+    reports: List<EmergencyReport>,
+    isGestureActive: Boolean
 ) {
     canvas.drawColor(Color.rgb(232, 239, 233))
     if (width <= 0 || height <= 0) return
@@ -191,23 +207,46 @@ private fun drawMap(
         canvas.drawPath(path, featurePaint)
     }
 
-    if (camera.zoom >= 1.5f) {
+    if (!isGestureActive && camera.zoom >= 1.25f) {
         val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(55, 76, 66)
-            textSize = max(11f, 11f * camera.zoom)
+            textSize = when {
+                camera.zoom >= 8f -> 13f
+                camera.zoom >= 3f -> 11f
+                else -> 9f
+            }
         }
-        dataset?.places
+        val candidates = dataset?.places
             ?.asSequence()
             ?.filter { place -> visibleBounds.contains(place.latitude, place.longitude) }
-            ?.take(250)
-            ?.forEach { place ->
-                canvas.drawText(
-                    place.name,
-                    screenX(place.longitude) + 4f,
-                    screenY(place.latitude) - 4f,
-                    labelPaint
+            ?.map { place ->
+                val categoryPriority = when (place.category.lowercase()) {
+                    "landmark", "transport", "medical", "geographical feature" -> 4
+                    "neighborhood", "city", "place" -> 3
+                    "road" -> if (camera.zoom >= 4f) 2 else 0
+                    else -> 1
+                }
+                MapLabelCandidate(
+                    name = place.name,
+                    x = screenX(place.longitude) + 4f,
+                    baselineY = screenY(place.latitude) - 4f,
+                    width = labelPaint.measureText(place.name),
+                    height = labelPaint.textSize,
+                    priority = categoryPriority
                 )
             }
+            ?.toList()
+            .orEmpty()
+        OfflineMapLabelFilter.select(
+            candidates = candidates,
+            maxLabels = when {
+                camera.zoom >= 8f -> 100
+                camera.zoom >= 3f -> 55
+                else -> 25
+            }
+        ).forEach { label ->
+            canvas.drawText(label.name, label.x, label.baselineY, labelPaint)
+        }
     }
 
     val markerFillPaint = Paint(Paint.ANTI_ALIAS_FLAG)

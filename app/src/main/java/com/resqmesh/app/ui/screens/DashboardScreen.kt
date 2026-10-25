@@ -33,6 +33,7 @@ import com.resqmesh.app.bluetooth.BleMessagingManager
 import com.resqmesh.app.ui.components.BleDiscoverySection
 import com.resqmesh.app.ui.components.BluetoothReadinessSection
 import com.resqmesh.app.ui.components.EmergencyReportingSection
+import com.resqmesh.app.location.OfflineLocationEngine
 import com.resqmesh.app.ui.theme.EmergencyAmber
 import com.resqmesh.app.ui.theme.EmergencyBackground
 import com.resqmesh.app.ui.theme.EmergencySurface
@@ -65,6 +66,10 @@ fun DashboardScreen(
         DashboardAction("Mesh Connectivity", "Explore device-to-device links", implemented = false)
     )
     val emergencyRepository = remember { LocalEmergencyRepository(context.applicationContext) }
+    val locationEngine = remember { OfflineLocationEngine(context.applicationContext) }
+    DisposableEffect(locationEngine) {
+        onDispose { locationEngine.close() }
+    }
 
     Column(
         modifier = Modifier
@@ -139,6 +144,7 @@ fun DashboardScreen(
         Spacer(modifier = Modifier.height(24.dp))
         EmergencyReportingSection(
             repository = emergencyRepository,
+            locationEngine = locationEngine,
             modifier = Modifier.fillMaxWidth()
         )
 
