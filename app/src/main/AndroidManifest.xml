@@ -17,10 +17,9 @@
     <uses-permission
         android:name="android.permission.BLUETOOTH_ADMIN"
         android:maxSdkVersion="30" />
-    <!-- Android 6-11 requires location permission for BLE discovery. -->
-    <uses-permission
-        android:name="android.permission.ACCESS_FINE_LOCATION"
-        android:maxSdkVersion="30" />
+    <!-- Foreground location: both permissions allow Android 12+ precise/approximate outcomes. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <!--
         RESQMesh does not derive a user's location from Bluetooth discovery, so

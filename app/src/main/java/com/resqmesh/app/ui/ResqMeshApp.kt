@@ -40,9 +40,15 @@ fun ResqMeshApp() {
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
 
-    fun showNotImplementedMessage() {
+    fun showActionMessage(actionTitle: String) {
         coroutineScope.launch {
-            snackbarHostState.showSnackbar("Not implemented yet")
+            snackbarHostState.showSnackbar(
+                if (actionTitle == "Emergency Reports") {
+                    "Emergency reporting is available in the section above."
+                } else {
+                    "Not implemented yet"
+                }
+            )
         }
     }
 
@@ -87,7 +93,7 @@ fun ResqMeshApp() {
                     profile = currentProfile,
                     contentPadding = innerPadding,
                     onEditProfile = { destination = AppDestination.PROFILE_SETUP },
-                    onActionClick = { showNotImplementedMessage() }
+                    onActionClick = ::showActionMessage
                 )
             }
         }

@@ -49,7 +49,6 @@ fun BleDiscoverySection(
     val manager = remember { BleDiscoveryManager(context.applicationContext) }
     var state by remember { mutableStateOf(manager.state) }
     var messagingState by remember { mutableStateOf(messagingManager.state) }
-    var selectedPeerId by remember { mutableStateOf<String?>(null) }
     var messageText by remember { mutableStateOf("") }
 
     DisposableEffect(manager) {
@@ -188,14 +187,12 @@ fun BleDiscoverySection(
                             anonymousId = peer.anonymousId,
                             lastSeen = formatLastSeenTime(peer.lastSeenAtMillis),
                             rssi = peer.rssi,
-                            selected = selectedPeerId == peer.anonymousId,
+                            selected = messagingState.selectedPeerId == peer.anonymousId,
                             connected = messagingState.connectedPeerId == peer.anonymousId,
                             onSelect = {
-                                selectedPeerId = peer.anonymousId
                                 messagingManager.selectPeer(peer.anonymousId)
                             },
                             onConnect = {
-                                selectedPeerId = peer.anonymousId
                                 messagingManager.selectPeer(peer.anonymousId)
                                 messagingManager.connectToPeer(peer, state.localAnonymousId)
                             }
@@ -206,7 +203,6 @@ fun BleDiscoverySection(
 
             MessagingPanel(
                 state = messagingState,
-                selectedPeerId = selectedPeerId,
                 messageText = messageText,
                 onMessageTextChange = { messageText = it },
                 onSend = {
@@ -279,7 +275,6 @@ private fun PeerRow(
 @Composable
 private fun MessagingPanel(
     state: com.resqmesh.app.bluetooth.BleMessagingState,
-    selectedPeerId: String?,
     messageText: String,
     onMessageTextChange: (String) -> Unit,
     onSend: () -> Unit
@@ -330,7 +325,7 @@ private fun MessagingPanel(
         value = messageText,
         onValueChange = onMessageTextChange,
         modifier = Modifier.fillMaxWidth(),
-        enabled = state.connectionStatus == BleConnectionStatus.CONNECTED && selectedPeerId != null,
+        enabled = state.connectionStatus == BleConnectionStatus.CONNECTED && state.selectedPeerId != null,
         label = { Text("Short test message") },
         placeholder = { Text("Type a UTF-8 message") },
         minLines = 1,
@@ -340,7 +335,7 @@ private fun MessagingPanel(
     Button(
         onClick = onSend,
         enabled = state.connectionStatus == BleConnectionStatus.CONNECTED &&
-            selectedPeerId != null && messageText.isNotBlank(),
+            state.selectedPeerId != null && messageText.isNotBlank(),
         modifier = Modifier.fillMaxWidth(),
         colors = ButtonDefaults.buttonColors(
             containerColor = EmergencyAmber,

@@ -28,16 +28,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.resqmesh.app.data.LocalProfile
+import com.resqmesh.app.data.LocalEmergencyRepository
 import com.resqmesh.app.bluetooth.BleMessagingManager
 import com.resqmesh.app.ui.components.BleDiscoverySection
 import com.resqmesh.app.ui.components.BluetoothReadinessSection
+import com.resqmesh.app.ui.components.EmergencyReportingSection
 import com.resqmesh.app.ui.theme.EmergencyAmber
 import com.resqmesh.app.ui.theme.EmergencyBackground
 import com.resqmesh.app.ui.theme.EmergencySurface
 
 private data class DashboardAction(
     val title: String,
-    val description: String
+    val description: String,
+    val implemented: Boolean
 )
 
 @Composable
@@ -45,7 +48,7 @@ fun DashboardScreen(
     profile: LocalProfile,
     contentPadding: PaddingValues,
     onEditProfile: () -> Unit,
-    onActionClick: () -> Unit
+    onActionClick: (String) -> Unit
 ) {
     val context = LocalContext.current
     val messagingManager = remember {
@@ -56,11 +59,12 @@ fun DashboardScreen(
     }
 
     val actions = listOf(
-        DashboardAction("Emergency Reports", "View and share local cases"),
-        DashboardAction("Responder Network", "Coordinate nearby help"),
-        DashboardAction("Hazard Map", "See reported hazards"),
-        DashboardAction("Mesh Connectivity", "Explore device-to-device links")
+        DashboardAction("Emergency Reports", "Create and view local cases", implemented = true),
+        DashboardAction("Responder Network", "Coordinate nearby help", implemented = false),
+        DashboardAction("Hazard Map", "See reported hazards", implemented = false),
+        DashboardAction("Mesh Connectivity", "Explore device-to-device links", implemented = false)
     )
+    val emergencyRepository = remember { LocalEmergencyRepository(context.applicationContext) }
 
     Column(
         modifier = Modifier
@@ -133,17 +137,9 @@ fun DashboardScreen(
         )
 
         Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            text = "No emergency cases yet",
-            color = Color.White,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = "This prototype does not invent cases or connectivity. Emergency reports will appear here when that feature is implemented.",
-            color = Color(0xFF9DB0BB),
-            style = MaterialTheme.typography.bodyMedium
+        EmergencyReportingSection(
+            repository = emergencyRepository,
+            modifier = Modifier.fillMaxWidth()
         )
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -164,7 +160,7 @@ fun DashboardScreen(
                         ActionCard(
                             action = action,
                             modifier = Modifier.weight(1f),
-                            onClick = onActionClick
+                            onClick = { onActionClick(action.title) }
                         )
                     }
                     if (rowActions.size == 1) {
@@ -194,7 +190,7 @@ private fun ActionCard(
                 shape = RoundedCornerShape(10.dp)
             ) {
                 Text(
-                    text = "NOT IMPLEMENTED",
+                    text = if (action.implemented) "AVAILABLE" else "NOT IMPLEMENTED",
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
                     color = EmergencyAmber,
                     style = MaterialTheme.typography.labelSmall,

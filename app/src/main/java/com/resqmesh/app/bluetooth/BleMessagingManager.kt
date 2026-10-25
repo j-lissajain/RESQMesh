@@ -708,6 +708,9 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         val peerId = ResqMeshBleProtocol.anonymousIdFor(payload) ?: return
         val connection = serverConnection ?: return
         connection.remotePeerId = peerId
+        if (selectedPeerId == null || !hasActivePeer(selectedPeerId)) {
+            selectedPeerId = peerId
+        }
         connection.handshakeTimeout?.let(mainHandler::removeCallbacks)
         connection.handshakeTimeout = null
         resolveDuplicateConnection(connection)
@@ -1016,8 +1019,9 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         clientConnectionTimeout?.let(mainHandler::removeCallbacks)
         clientConnectionTimeout = null
         val address = clientDeviceAddress.orEmpty()
+        val disconnectedPeerId = clientPeerId
         markPendingForRoute(
-            RouteRef(TransportSide.CLIENT, address, clientPeerId),
+            RouteRef(TransportSide.CLIENT, address, disconnectedPeerId),
             MessageDeliveryState.DISCONNECTED
         )
         gatt.close()
@@ -1030,9 +1034,13 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         clientWriteQueue.clear()
         clientWriteInFlight = null
         clientReassembler.clear()
+        if (selectedPeerId == disconnectedPeerId) {
+            selectedPeerId = firstActivePeerId()
+        }
         publish(
             _state.copy(
                 connectionStatus = BleConnectionStatus.DISCONNECTED,
+                selectedPeerId = selectedPeerId,
                 connectedPeerId = null,
                 error = if (status == BluetoothGatt.GATT_SUCCESS) {
                     null
@@ -1050,8 +1058,9 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         clientConnectionTimeout = null
         val gatt = clientGatt
         val address = clientDeviceAddress.orEmpty()
+        val failedPeerId = clientPeerId
         markPendingForRoute(
-            RouteRef(TransportSide.CLIENT, address, clientPeerId),
+            RouteRef(TransportSide.CLIENT, address, failedPeerId),
             MessageDeliveryState.FAILED
         )
         clientGatt = null
@@ -1063,6 +1072,9 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         clientWriteQueue.clear()
         clientWriteInFlight = null
         clientReassembler.clear()
+        if (selectedPeerId == failedPeerId) {
+            selectedPeerId = firstActivePeerId()
+        }
         try {
             gatt?.disconnect()
             gatt?.close()
@@ -1072,6 +1084,7 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         publish(
             _state.copy(
                 connectionStatus = BleConnectionStatus.DISCONNECTED,
+                selectedPeerId = selectedPeerId,
                 connectedPeerId = null,
                 error = message
             )
@@ -1084,9 +1097,10 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         clientConnectionTimeout?.let(mainHandler::removeCallbacks)
         clientConnectionTimeout = null
         val address = clientDeviceAddress.orEmpty()
+        val closedPeerId = clientPeerId
         if (markPending) {
             markPendingForRoute(
-                RouteRef(TransportSide.CLIENT, address, clientPeerId),
+                RouteRef(TransportSide.CLIENT, address, closedPeerId),
                 MessageDeliveryState.DISCONNECTED
             )
         }
@@ -1100,6 +1114,9 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         clientWriteQueue.clear()
         clientWriteInFlight = null
         clientReassembler.clear()
+        if (selectedPeerId == closedPeerId) {
+            selectedPeerId = firstActivePeerId()
+        }
         try {
             gatt?.disconnect()
             gatt?.close()
@@ -1154,6 +1171,9 @@ class BleMessagingManager(context: Context) : AutoCloseable {
             it.notificationsEnabled && it.remotePeerId != null
         }
         val connectedId = if (clientConnected) clientPeerId else serverConnection?.remotePeerId
+        if (selectedPeerId != null && !hasActivePeer(selectedPeerId)) {
+            selectedPeerId = connectedId ?: firstActivePeerId()
+        }
         val status = when {
             connectedId != null -> BleConnectionStatus.CONNECTED
             clientGatt != null || serverConnections.isNotEmpty() -> BleConnectionStatus.CONNECTING
@@ -1166,6 +1186,7 @@ class BleMessagingManager(context: Context) : AutoCloseable {
             _state.copy(
                 serverReady = gattServer != null,
                 connectionStatus = status,
+                selectedPeerId = selectedPeerId,
                 connectedPeerId = connectedId
             )
         )
@@ -1215,6 +1236,21 @@ class BleMessagingManager(context: Context) : AutoCloseable {
 
     private fun updateError(message: String) {
         publish(_state.copy(error = message))
+    }
+
+    private fun hasActivePeer(peerId: String?): Boolean {
+        if (peerId == null) return false
+        return (clientReady && clientPeerId == peerId) ||
+            serverConnections.values.any {
+                it.notificationsEnabled && it.remotePeerId == peerId
+            }
+    }
+
+    private fun firstActivePeerId(): String? = when {
+        clientReady -> clientPeerId
+        else -> serverConnections.values.firstOrNull {
+            it.notificationsEnabled && it.remotePeerId != null
+        }?.remotePeerId
     }
 
     private fun publish(newState: BleMessagingState) {
