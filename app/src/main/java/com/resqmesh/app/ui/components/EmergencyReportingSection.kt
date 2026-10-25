@@ -53,12 +53,18 @@ import com.resqmesh.app.location.LocationEngineState
 import com.resqmesh.app.location.LocationPermissions
 import com.resqmesh.app.location.LocationStatus
 import com.resqmesh.app.location.OfflineLocationEngine
+import com.resqmesh.app.maps.NagpurMapData
+import com.resqmesh.app.maps.OfflineMapCamera
+import com.resqmesh.app.maps.OfflineMapDataset
+import com.resqmesh.app.maps.OfflineMapRepository
 import com.resqmesh.app.ui.theme.EmergencyAmber
 import com.resqmesh.app.ui.theme.EmergencySurface
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun EmergencyReportingSection(
@@ -70,8 +76,27 @@ fun EmergencyReportingSection(
     var locationState by remember { mutableStateOf(locationEngine.state) }
     var reports by remember { mutableStateOf(repository.list()) }
     var showCreateDialog by remember { mutableStateOf(false) }
+    var showMapPicker by remember { mutableStateOf(false) }
     var selectedReport by remember { mutableStateOf<EmergencyReport?>(null) }
+    var selectedMapLocation by remember { mutableStateOf<EmergencyLocation?>(null) }
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val mapRepository = remember { OfflineMapRepository(context.applicationContext) }
+    var mapDataset by remember { mutableStateOf<OfflineMapDataset?>(null) }
+    val mapDatasetDescription = remember { mapRepository.datasetDescription() }
+    var mapCamera by remember {
+        mutableStateOf(
+            OfflineMapCamera(
+                latitude = NagpurMapData.centerLatitude,
+                longitude = NagpurMapData.centerLongitude,
+                zoom = 1f
+            )
+        )
+    }
+    var mapSearchQuery by remember { mutableStateOf("") }
+
+    LaunchedEffect(mapRepository) {
+        mapDataset = withContext(Dispatchers.Default) { mapRepository.loadDataset() }
+    }
 
     DisposableEffect(locationEngine) {
         val removeListener = locationEngine.addListener { updatedState ->
@@ -137,8 +162,36 @@ fun EmergencyReportingSection(
             )
 
             Spacer(modifier = Modifier.height(14.dp))
+            OfflineNagpurMapCard(
+                dataset = mapDataset,
+                datasetDescription = mapDatasetDescription,
+                camera = mapCamera,
+                onCameraChange = { mapCamera = it },
+                searchQuery = mapSearchQuery,
+                onSearchQueryChange = { mapSearchQuery = it },
+                locationState = locationState,
+                reports = reports,
+                onCenterOnLocation = {
+                    val reading = locationState.reading
+                    if (reading != null && NagpurMapData.isCovered(reading.latitude, reading.longitude)) {
+                        mapCamera = mapCamera.copy(
+                            latitude = reading.latitude,
+                            longitude = reading.longitude,
+                            zoom = 3f
+                        )
+                    }
+                },
+                onOpenPicker = { showMapPicker = true },
+                onReportClick = { selectedReport = it },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
             Button(
-                onClick = { showCreateDialog = true },
+                onClick = {
+                    selectedMapLocation = null
+                    showCreateDialog = true
+                },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = EmergencyAmber,
@@ -173,11 +226,27 @@ fun EmergencyReportingSection(
     if (showCreateDialog) {
         CreateEmergencyDialog(
             locationState = locationState,
+            mapLocation = selectedMapLocation,
+            onChooseOnMap = { showMapPicker = true },
             onDismiss = { showCreateDialog = false },
             onSave = { report ->
                 repository.save(report)
                 reports = repository.list()
                 showCreateDialog = false
+            }
+        )
+    }
+
+    if (showMapPicker) {
+        OfflineMapPickerDialog(
+            dataset = mapDataset,
+            initialCamera = mapCamera,
+            locationReading = locationState.reading,
+            onDismiss = { showMapPicker = false },
+            onConfirm = { latitude, longitude ->
+                selectedMapLocation = NagpurMapData.selectedLocation(latitude, longitude, System.currentTimeMillis())
+                mapCamera = mapCamera.copy(latitude = latitude, longitude = longitude, zoom = maxOf(mapCamera.zoom, 2f))
+                showMapPicker = false
             }
         )
     }
@@ -331,6 +400,7 @@ private fun ReportSummaryCard(
 
 private enum class LocationChoice {
     CURRENT,
+    MAP,
     MANUAL,
     NONE
 }
@@ -338,18 +408,25 @@ private enum class LocationChoice {
 @Composable
 private fun CreateEmergencyDialog(
     locationState: LocationEngineState,
+    mapLocation: EmergencyLocation?,
+    onChooseOnMap: () -> Unit,
     onDismiss: () -> Unit,
     onSave: (EmergencyReport) -> Unit
 ) {
     var type by remember { mutableStateOf(EmergencyType.MEDICAL) }
     var severity by remember { mutableStateOf(EmergencySeverity.HIGH) }
     var description by remember { mutableStateOf("") }
+    var locationDescription by remember { mutableStateOf("") }
     var latitude by remember { mutableStateOf("") }
     var longitude by remember { mutableStateOf("") }
     var locationChoice by remember {
         mutableStateOf(if (locationState.reading != null) LocationChoice.CURRENT else LocationChoice.NONE)
     }
     var validationError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(mapLocation) {
+        if (mapLocation != null) locationChoice = LocationChoice.MAP
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -408,9 +485,20 @@ private fun CreateEmergencyDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 FilterChip(
+                    selected = locationChoice == LocationChoice.MAP,
+                    onClick = onChooseOnMap,
+                    label = {
+                        Text(
+                            if (mapLocation == null) "Choose on offline Nagpur map"
+                            else "Map pin: ${formatCoordinate(mapLocation.latitude)}, ${formatCoordinate(mapLocation.longitude)}"
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                FilterChip(
                     selected = locationChoice == LocationChoice.MANUAL,
                     onClick = { locationChoice = LocationChoice.MANUAL },
-                    label = { Text("Enter manual coordinates (unverified)") },
+                    label = { Text("Advanced: enter coordinates (unverified)") },
                     modifier = Modifier.fillMaxWidth()
                 )
                 FilterChip(
@@ -444,6 +532,22 @@ private fun CreateEmergencyDialog(
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
+                if (locationChoice == LocationChoice.MAP && mapLocation != null) {
+                    Text(
+                        text = "Map-selected coordinates are stored as manually selected and unverified.",
+                        color = Color(0xFF9DB0BB),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                OutlinedTextField(
+                    value = locationDescription,
+                    onValueChange = { locationDescription = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Optional landmark / location description") },
+                    placeholder = { Text("Near the main entrance, behind the hostel building.") },
+                    minLines = 2,
+                    maxLines = 4
+                )
                 validationError?.let { error ->
                     Text(text = error, color = MaterialTheme.colorScheme.error)
                 }
@@ -454,6 +558,7 @@ private fun CreateEmergencyDialog(
                 onClick = {
                     val reportLocation = when (locationChoice) {
                         LocationChoice.CURRENT -> locationState.reading?.toEmergencyLocation()
+                        LocationChoice.MAP -> mapLocation
                         LocationChoice.MANUAL -> EmergencyReportValidation.parseManualLocation(
                             latitudeText = latitude,
                             longitudeText = longitude,
@@ -465,6 +570,9 @@ private fun CreateEmergencyDialog(
                         !EmergencyReportValidation.isDescriptionValid(description) -> "Enter a short description."
                         locationChoice == LocationChoice.CURRENT && reportLocation == null -> {
                             "The current device location is no longer available. Refresh or choose another option."
+                        }
+                        locationChoice == LocationChoice.MAP && reportLocation == null -> {
+                            "Choose a point on the offline map before saving."
                         }
                         locationChoice == LocationChoice.MANUAL && reportLocation == null -> {
                             "Enter valid latitude (-90 to 90) and longitude (-180 to 180)."
@@ -479,7 +587,8 @@ private fun CreateEmergencyDialog(
                                 description = description.trim(),
                                 createdAtMillis = System.currentTimeMillis(),
                                 status = EmergencyReportStatus.LOCAL_ONLY,
-                                location = reportLocation
+                                location = reportLocation,
+                                locationDescription = locationDescription.trim().takeIf { it.isNotBlank() }
                             )
                         )
                     }
@@ -512,6 +621,9 @@ private fun ReportDetailsDialog(
                 Text(text = "Status: ${report.status.label}")
                 Text(text = "Created: ${formatTimestamp(report.createdAtMillis)}")
                 Text(text = report.description)
+                report.locationDescription?.let {
+                    Text(text = "Landmark / location description: $it")
+                }
                 val location = report.location
                 if (location == null) {
                     Text(text = "Location: not provided")

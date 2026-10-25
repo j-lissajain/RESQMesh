@@ -40,6 +40,7 @@ enum class EmergencyReportStatus(val label: String) {
 
 enum class EmergencyLocationSource(val label: String) {
     GNSS("Device-reported GNSS/GPS"),
+    MAP("Offline map pin — unverified"),
     MANUAL("Manual entry — unverified");
 
     companion object {
@@ -64,5 +65,6 @@ data class EmergencyReport(
     val description: String,
     val createdAtMillis: Long,
     val status: EmergencyReportStatus = EmergencyReportStatus.LOCAL_ONLY,
-    val location: EmergencyLocation? = null
+    val location: EmergencyLocation? = null,
+    val locationDescription: String? = null
 )

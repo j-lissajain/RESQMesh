@@ -530,6 +530,7 @@ class BleMessagingManager(context: Context) : AutoCloseable {
                     publish(
                         _state.copy(
                             connectionStatus = BleConnectionStatus.CONNECTED,
+                            selectedPeerId = selectedPeerId ?: clientPeerId,
                             connectedPeerId = clientPeerId,
                             error = null
                         )
@@ -1171,9 +1172,13 @@ class BleMessagingManager(context: Context) : AutoCloseable {
             it.notificationsEnabled && it.remotePeerId != null
         }
         val connectedId = if (clientConnected) clientPeerId else serverConnection?.remotePeerId
-        if (selectedPeerId != null && !hasActivePeer(selectedPeerId)) {
-            selectedPeerId = connectedId ?: firstActivePeerId()
-        }
+        selectedPeerId = BlePeerSelection.retainOrChoose(
+            currentPeerId = selectedPeerId,
+            activePeerIds = buildList {
+                connectedId?.let(::add)
+                serverConnection?.remotePeerId?.let { if (it != connectedId) add(it) }
+            }
+        )
         val status = when {
             connectedId != null -> BleConnectionStatus.CONNECTED
             clientGatt != null || serverConnections.isNotEmpty() -> BleConnectionStatus.CONNECTING

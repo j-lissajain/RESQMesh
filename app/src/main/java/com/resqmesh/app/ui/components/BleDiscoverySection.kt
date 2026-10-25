@@ -325,7 +325,8 @@ private fun MessagingPanel(
         value = messageText,
         onValueChange = onMessageTextChange,
         modifier = Modifier.fillMaxWidth(),
-        enabled = state.connectionStatus == BleConnectionStatus.CONNECTED && state.selectedPeerId != null,
+         enabled = state.connectionStatus == BleConnectionStatus.CONNECTED &&
+             state.connectedPeerId != null && state.selectedPeerId == state.connectedPeerId,
         label = { Text("Short test message") },
         placeholder = { Text("Type a UTF-8 message") },
         minLines = 1,
@@ -334,8 +335,9 @@ private fun MessagingPanel(
     Spacer(modifier = Modifier.height(8.dp))
     Button(
         onClick = onSend,
-        enabled = state.connectionStatus == BleConnectionStatus.CONNECTED &&
-            state.selectedPeerId != null && messageText.isNotBlank(),
+         enabled = state.connectionStatus == BleConnectionStatus.CONNECTED &&
+             state.connectedPeerId != null && state.selectedPeerId == state.connectedPeerId &&
+             messageText.isNotBlank(),
         modifier = Modifier.fillMaxWidth(),
         colors = ButtonDefaults.buttonColors(
             containerColor = EmergencyAmber,
