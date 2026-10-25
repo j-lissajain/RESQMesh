@@ -20,11 +20,15 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.resqmesh.app.data.LocalProfile
+import com.resqmesh.app.bluetooth.BleMessagingManager
 import com.resqmesh.app.ui.components.BleDiscoverySection
 import com.resqmesh.app.ui.components.BluetoothReadinessSection
 import com.resqmesh.app.ui.theme.EmergencyAmber
@@ -43,6 +47,14 @@ fun DashboardScreen(
     onEditProfile: () -> Unit,
     onActionClick: () -> Unit
 ) {
+    val context = LocalContext.current
+    val messagingManager = remember {
+        BleMessagingManager(context.applicationContext)
+    }
+    DisposableEffect(messagingManager) {
+        onDispose { messagingManager.close() }
+    }
+
     val actions = listOf(
         DashboardAction("Emergency Reports", "View and share local cases"),
         DashboardAction("Responder Network", "Coordinate nearby help"),
@@ -115,7 +127,10 @@ fun DashboardScreen(
         BluetoothReadinessSection(modifier = Modifier.fillMaxWidth())
 
         Spacer(modifier = Modifier.height(16.dp))
-        BleDiscoverySection(modifier = Modifier.fillMaxWidth())
+        BleDiscoverySection(
+            modifier = Modifier.fillMaxWidth(),
+            messagingManager = messagingManager
+        )
 
         Spacer(modifier = Modifier.height(24.dp))
         Text(

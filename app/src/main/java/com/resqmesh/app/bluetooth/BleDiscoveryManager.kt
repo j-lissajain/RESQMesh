@@ -33,6 +33,10 @@ import java.util.UUID
 object ResqMeshBleProtocol {
     val SERVICE_UUID: UUID = UUID.fromString("7d7f6c2a-4d20-4f7a-9d11-8fb6a7a4c201")
     val SERVICE_PARCEL_UUID: ParcelUuid = ParcelUuid(SERVICE_UUID)
+    // The same stable service UUID is advertised for discovery and hosted by
+    // the GATT server for the messaging transport.
+    val MESSAGE_CHARACTERISTIC_UUID: UUID =
+        UUID.fromString("7d7f6c2a-4d20-4f7a-9d11-8fb6a7a4c202")
     // Private prototype payload namespace; it is not used as a device identity.
     const val MANUFACTURER_ID: Int = 0xFFFF
 
@@ -62,13 +66,16 @@ object ResqMeshBleProtocol {
 data class BlePeer(
     val anonymousId: String,
     val lastSeenAtMillis: Long,
-    val rssi: Int?
+    val rssi: Int?,
+    /** Internal Bluetooth address used only to initiate a GATT connection. */
+    val deviceAddress: String
 )
 
 data class BleDiscoveryState(
     val isStarting: Boolean = false,
     val isScanning: Boolean = false,
     val isAdvertising: Boolean = false,
+    val localAnonymousId: String? = null,
     val peers: List<BlePeer> = emptyList(),
     val statusMessage: String = "Discovery is stopped.",
     val error: String? = null
@@ -110,6 +117,8 @@ class BleDiscoveryManager(context: Context) : AutoCloseable {
         return { listeners -= listener }
     }
 
+    fun getPeer(peerId: String): BlePeer? = peersById[peerId]
+
     fun startDiscovery() {
         if (closed || _state.isActive) return
 
@@ -117,6 +126,7 @@ class BleDiscoveryManager(context: Context) : AutoCloseable {
         publish(
             _state.copy(
                 isStarting = true,
+                localAnonymousId = null,
                 peers = emptyList(),
                 statusMessage = "Starting BLE discovery...",
                 error = null
@@ -241,11 +251,12 @@ class BleDiscoveryManager(context: Context) : AutoCloseable {
                 _state.copy(
                     isStarting = false,
                     isScanning = true,
-                        statusMessage = activeStatus(
-                            isScanning = true,
-                            isAdvertising = _state.isAdvertising
-                        ),
-                        error = _state.error
+                    localAnonymousId = localAnonymousId,
+                    statusMessage = activeStatus(
+                        isScanning = true,
+                        isAdvertising = _state.isAdvertising
+                    ),
+                    error = _state.error
                 )
             )
         } catch (_: SecurityException) {
@@ -270,7 +281,8 @@ class BleDiscoveryManager(context: Context) : AutoCloseable {
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
-            .setConnectable(false)
+            // Discovery peers must be able to initiate a GATT connection.
+            .setConnectable(true)
             .setTimeout(0)
             .build()
         val sessionToken = ResqMeshBleProtocol.newSessionToken()
@@ -297,6 +309,7 @@ class BleDiscoveryManager(context: Context) : AutoCloseable {
                     _state.copy(
                         isStarting = false,
                         isAdvertising = true,
+                        localAnonymousId = localAnonymousId,
                         statusMessage = activeStatus(
                             isScanning = _state.isScanning,
                             isAdvertising = true
@@ -374,7 +387,8 @@ class BleDiscoveryManager(context: Context) : AutoCloseable {
         val peer = BlePeer(
             anonymousId = anonymousId,
             lastSeenAtMillis = System.currentTimeMillis(),
-            rssi = result.rssi
+            rssi = result.rssi,
+            deviceAddress = result.device.address
         )
         peersById[anonymousId] = peer
         publish(_state.copy(peers = peersById.values.sortedByDescending { it.lastSeenAtMillis }))
