@@ -424,7 +424,11 @@ private fun ReportSummaryCard(
             )
             report.receivedFromPeerId?.let {
                 Text(
-                     text = stringResource(R.string.received_from_peer),
+                    text = if (report.contentTrust == com.resqmesh.app.data.EmergencyContentTrust.REMOTE_AUTHENTICATED) {
+                        stringResource(R.string.received_from_peer_authenticated)
+                    } else {
+                        stringResource(R.string.received_from_peer)
+                    },
                     color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.labelSmall
                 )
@@ -767,16 +771,20 @@ private fun ReportDetailsDialog(
                  Text(text = stringResource(R.string.content_revision, report.contentRevision))
                  Text(text = stringResource(R.string.relay_envelope, report.hopCount, report.remainingTtl))
                  Text(
-                     text = if (report.contentTrust == com.resqmesh.app.data.EmergencyContentTrust.REMOTE_UNVERIFIED) {
-                         stringResource(R.string.content_origin_unverified)
-                     } else {
-                         stringResource(R.string.content_origin_local)
+                     text = when (report.contentTrust) {
+                         com.resqmesh.app.data.EmergencyContentTrust.REMOTE_AUTHENTICATED ->
+                             stringResource(R.string.content_origin_authenticated)
+                         com.resqmesh.app.data.EmergencyContentTrust.REMOTE_UNVERIFIED ->
+                             stringResource(R.string.content_origin_unverified)
+                         com.resqmesh.app.data.EmergencyContentTrust.LOCAL_ORIGINATED ->
+                             stringResource(R.string.content_origin_local)
                      }
                  )
                  Text(text = stringResource(R.string.created_at, formatTimestamp(report.createdAtMillis)))
                 OutlinedTextField(
                     value = description,
-                    onValueChange = { description = it },
+                    onValueChange = { if (report.contentTrust == com.resqmesh.app.data.EmergencyContentTrust.LOCAL_ORIGINATED) description = it },
+                    readOnly = report.contentTrust != com.resqmesh.app.data.EmergencyContentTrust.LOCAL_ORIGINATED,
                      label = { Text(stringResource(R.string.description)) },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
@@ -809,7 +817,9 @@ private fun ReportDetailsDialog(
         },
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (report.lifecycleStatus == EmergencyLifecycleStatus.ACTIVE) {
+                if (report.lifecycleStatus == EmergencyLifecycleStatus.ACTIVE &&
+                    report.contentTrust == com.resqmesh.app.data.EmergencyContentTrust.LOCAL_ORIGINATED
+                ) {
                      TextButton(onClick = { if (description.trim() != report.description.trim()) onContentUpdate(description.trim()) }) { Text(stringResource(R.string.save_edit)) }
                      TextButton(onClick = { onLifecycleChange(EmergencyLifecycleStatus.RESOLVED) }) { Text(stringResource(R.string.resolve)) }
                      TextButton(onClick = { onLifecycleChange(EmergencyLifecycleStatus.CANCELLED) }) { Text(stringResource(R.string.cancel_emergency)) }

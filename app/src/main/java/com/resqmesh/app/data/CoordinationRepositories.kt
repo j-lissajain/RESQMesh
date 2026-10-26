@@ -1,32 +1,65 @@
 package com.resqmesh.app.data
 
 import android.content.Context
+import com.resqmesh.app.security.MeshTrustState
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 
 private class JsonPreferencesStore(
-    context: Context,
-    name: String,
-    private val key: String
+    private val readRaw: () -> String,
+    private val writeRaw: (String) -> Unit
 ) {
-    private val preferences = context.applicationContext.getSharedPreferences(name, Context.MODE_PRIVATE)
+    constructor(
+        context: Context,
+        name: String,
+        key: String
+    ) : this(
+        readRaw = {
+            context.applicationContext
+                .getSharedPreferences(name, Context.MODE_PRIVATE)
+                .getString(key, "[]") ?: "[]"
+        },
+        writeRaw = { value ->
+            context.applicationContext
+                .getSharedPreferences(name, Context.MODE_PRIVATE)
+                .edit()
+                .putString(key, value)
+                .commit()
+        }
+    )
+
     private val lock = Any()
 
     fun read(): JSONArray = synchronized(lock) {
-        runCatching { JSONArray(preferences.getString(key, "[]") ?: "[]") }.getOrElse { JSONArray() }
+        runCatching { JSONArray(readRaw()) }.getOrElse { JSONArray() }
     }
 
     fun write(array: JSONArray) = synchronized(lock) {
-        preferences.edit().putString(key, array.toString()).commit()
+        writeRaw(array.toString())
+    }
+
+    companion object {
+        fun inMemory(): JsonPreferencesStore {
+            var raw = "[]"
+            return JsonPreferencesStore(
+                readRaw = { raw },
+                writeRaw = { raw = it }
+            )
+        }
     }
 }
 
-class VolunteerProfileStore(context: Context) {
-    private val store = JsonPreferencesStore(context, "resqmesh_volunteers", "profiles")
+class VolunteerProfileStore private constructor(private val store: JsonPreferencesStore) {
+    constructor(context: Context) : this(JsonPreferencesStore(context, "resqmesh_volunteers", "profiles"))
 
     fun list(nowMillis: Long = System.currentTimeMillis()): List<VolunteerProfile> = store.read().toList { json ->
         runCatching {
+            val remoteUnverified = json.optBoolean("remote_unverified", false)
+            val trustState = runCatching {
+                MeshTrustState.valueOf(json.optString("trust_state"))
+            }.getOrNull() ?: if (remoteUnverified) MeshTrustState.LEGACY_UNSIGNED else MeshTrustState.LOCAL
+            val fingerprint = json.optString("origin_fingerprint").takeIf { it.isNotBlank() }
             val record = MeshRecord(
                 recordId = json.optString("id"),
                 type = MeshRecordType.VOLUNTEER,
@@ -34,20 +67,39 @@ class VolunteerProfileStore(context: Context) {
                 revision = json.optInt("revision", 1),
                 createdAtMillis = json.optLong("updated_at", 1L),
                 updatedAtMillis = json.optLong("updated_at", 1L),
-                body = json
+                body = json,
+                trustState = trustState,
+                originFingerprint = fingerprint
             )
-            json.toVolunteerProfile(record)?.copy(isRemoteUnverified = json.optBoolean("remote_unverified", false))
+            json.toVolunteerProfile(record)?.copy(
+                isRemoteUnverified = remoteUnverified,
+                trustState = trustState,
+                originFingerprint = fingerprint
+            )
         }.getOrNull()
-    }.filter { it.expiresAtMillis == null || it.expiresAtMillis > nowMillis }
+    }.distinctBy { it.id }.filter { it.expiresAtMillis == null || it.expiresAtMillis > nowMillis }
 
     fun save(profile: VolunteerProfile): VolunteerProfile {
         val current = list().toMutableList()
         val index = current.indexOfFirst { it.id == profile.id }
-        if (index < 0 || profile.revision >= current[index].revision) {
-            if (index < 0) current += profile else current[index] = profile
+        if (index < 0) {
+            current += profile
+        } else {
+            val existing = current[index]
+            val canReplace = when {
+                !existing.isRemoteUnverified && profile.isRemoteUnverified -> false
+                profile.revision > existing.revision -> true
+                profile.revision == existing.revision && !profile.isRemoteUnverified -> true
+                profile.revision == existing.revision &&
+                    existing.trustState == MeshTrustState.LEGACY_UNSIGNED &&
+                    profile.trustState != MeshTrustState.LEGACY_UNSIGNED -> true
+                else -> false
+            }
+            if (canReplace) current[index] = profile
         }
-        store.write(JSONArray(current.map(::volunteerToJson)))
-        return current.first { it.id == profile.id }
+        val deduplicated = current.distinctBy { it.id }
+        store.write(JSONArray(deduplicated.map(::volunteerToJson)))
+        return deduplicated.first { it.id == profile.id }
     }
 
     private fun volunteerToJson(profile: VolunteerProfile): JSONObject = JSONObject().apply {
@@ -64,15 +116,26 @@ class VolunteerProfileStore(context: Context) {
         put("revision", profile.revision)
         put("updated_at", profile.updatedAtMillis)
         put("remote_unverified", profile.isRemoteUnverified)
+        put("trust_state", profile.trustState.name)
+        profile.originFingerprint?.let { put("origin_fingerprint", it) }
         profile.expiresAtMillis?.let { put("expires_at", it) }
+    }
+
+    companion object {
+        fun inMemory(): VolunteerProfileStore = VolunteerProfileStore(JsonPreferencesStore.inMemory())
     }
 }
 
-class ResourceStore(context: Context) {
-    private val store = JsonPreferencesStore(context, "resqmesh_resources", "records")
+class ResourceStore private constructor(private val store: JsonPreferencesStore) {
+    constructor(context: Context) : this(JsonPreferencesStore(context, "resqmesh_resources", "records"))
 
     fun list(nowMillis: Long = System.currentTimeMillis()): List<ResourceRecord> = store.read().toList { json ->
         runCatching {
+            val remoteUnverified = json.optBoolean("remote_unverified", false)
+            val trustState = runCatching {
+                MeshTrustState.valueOf(json.optString("trust_state"))
+            }.getOrNull() ?: if (remoteUnverified) MeshTrustState.LEGACY_UNSIGNED else MeshTrustState.LOCAL
+            val fingerprint = json.optString("origin_fingerprint").takeIf { it.isNotBlank() }
             val record = MeshRecord(
                 recordId = json.optString("id"),
                 type = MeshRecordType.RESOURCE,
@@ -80,20 +143,39 @@ class ResourceStore(context: Context) {
                 revision = json.optInt("revision", 1),
                 createdAtMillis = json.optLong("created_at", 1L),
                 updatedAtMillis = json.optLong("updated_at", 1L),
-                body = json
+                body = json,
+                trustState = trustState,
+                originFingerprint = fingerprint
             )
-            json.toResourceRecord(record)?.copy(isRemoteUnverified = json.optBoolean("remote_unverified", false))
+            json.toResourceRecord(record)?.copy(
+                isRemoteUnverified = remoteUnverified,
+                trustState = trustState,
+                originFingerprint = fingerprint
+            )
         }.getOrNull()
-    }.filter { it.expiresAtMillis == null || it.expiresAtMillis > nowMillis }
+    }.distinctBy { it.id }.filter { it.expiresAtMillis == null || it.expiresAtMillis > nowMillis }
 
     fun save(resource: ResourceRecord): ResourceRecord {
         val current = list().toMutableList()
         val index = current.indexOfFirst { it.id == resource.id }
-        if (index < 0 || resource.revision >= current[index].revision) {
-            if (index < 0) current += resource else current[index] = resource
+        if (index < 0) {
+            current += resource
+        } else {
+            val existing = current[index]
+            val canReplace = when {
+                !existing.isRemoteUnverified && resource.isRemoteUnverified -> false
+                resource.revision > existing.revision -> true
+                resource.revision == existing.revision && !resource.isRemoteUnverified -> true
+                resource.revision == existing.revision &&
+                    existing.trustState == MeshTrustState.LEGACY_UNSIGNED &&
+                    resource.trustState != MeshTrustState.LEGACY_UNSIGNED -> true
+                else -> false
+            }
+            if (canReplace) current[index] = resource
         }
-        store.write(JSONArray(current.map(::resourceToJson)))
-        return current.first { it.id == resource.id }
+        val deduplicated = current.distinctBy { it.id }
+        store.write(JSONArray(deduplicated.map(::resourceToJson)))
+        return deduplicated.first { it.id == resource.id }
     }
 
     private fun resourceToJson(resource: ResourceRecord): JSONObject = JSONObject().apply {
@@ -114,17 +196,28 @@ class ResourceStore(context: Context) {
         put("updated_at", resource.updatedAtMillis)
         put("revision", resource.revision)
         put("remote_unverified", resource.isRemoteUnverified)
+        put("trust_state", resource.trustState.name)
+        resource.originFingerprint?.let { put("origin_fingerprint", it) }
         resource.expiresAtMillis?.let { put("expires_at", it) }
+    }
+
+    companion object {
+        fun inMemory(): ResourceStore = ResourceStore(JsonPreferencesStore.inMemory())
     }
 }
 
-class AssistanceResponseStore(context: Context) {
-    private val store = JsonPreferencesStore(context, "resqmesh_responses", "records")
+class AssistanceResponseStore private constructor(private val store: JsonPreferencesStore) {
+    constructor(context: Context) : this(JsonPreferencesStore(context, "resqmesh_responses", "records"))
 
     fun listForEmergency(emergencyId: String): List<AssistanceResponse> = list().filter { it.emergencyId == emergencyId }
 
     fun list(): List<AssistanceResponse> = store.read().toList { json ->
         runCatching {
+            val remoteUnverified = json.optBoolean("remote_unverified", false)
+            val trustState = runCatching {
+                MeshTrustState.valueOf(json.optString("trust_state"))
+            }.getOrNull() ?: if (remoteUnverified) MeshTrustState.LEGACY_UNSIGNED else MeshTrustState.LOCAL
+            val fingerprint = json.optString("origin_fingerprint").takeIf { it.isNotBlank() }
             val record = MeshRecord(
                 recordId = json.optString("id"),
                 type = MeshRecordType.RESPONSE,
@@ -132,20 +225,39 @@ class AssistanceResponseStore(context: Context) {
                 revision = json.optInt("revision", 1),
                 createdAtMillis = json.optLong("created_at", 1L),
                 updatedAtMillis = json.optLong("updated_at", 1L),
-                body = json
+                body = json,
+                trustState = trustState,
+                originFingerprint = fingerprint
             )
-            json.toAssistanceResponse(record)?.copy(isRemoteUnverified = json.optBoolean("remote_unverified", false))
+            json.toAssistanceResponse(record)?.copy(
+                isRemoteUnverified = remoteUnverified,
+                trustState = trustState,
+                originFingerprint = fingerprint
+            )
         }.getOrNull()
-    }
+    }.distinctBy { it.id }
 
     fun save(response: AssistanceResponse): AssistanceResponse {
         val current = list().toMutableList()
         val index = current.indexOfFirst { it.id == response.id }
-        if (index < 0 || response.revision >= current[index].revision) {
-            if (index < 0) current += response else current[index] = response
+        if (index < 0) {
+            current += response
+        } else {
+            val existing = current[index]
+            val canReplace = when {
+                !existing.isRemoteUnverified && response.isRemoteUnverified -> false
+                response.revision > existing.revision -> true
+                response.revision == existing.revision && !response.isRemoteUnverified -> true
+                response.revision == existing.revision &&
+                    existing.trustState == MeshTrustState.LEGACY_UNSIGNED &&
+                    response.trustState != MeshTrustState.LEGACY_UNSIGNED -> true
+                else -> false
+            }
+            if (canReplace) current[index] = response
         }
-        store.write(JSONArray(current.map(::responseToJson)))
-        return current.first { it.id == response.id }
+        val deduplicated = current.distinctBy { it.id }
+        store.write(JSONArray(deduplicated.map(::responseToJson)))
+        return deduplicated.first { it.id == response.id }
     }
 
     private fun responseToJson(response: AssistanceResponse): JSONObject = JSONObject().apply {
@@ -160,6 +272,12 @@ class AssistanceResponseStore(context: Context) {
         put("updated_at", response.updatedAtMillis)
         put("revision", response.revision)
         put("remote_unverified", response.isRemoteUnverified)
+        put("trust_state", response.trustState.name)
+        response.originFingerprint?.let { put("origin_fingerprint", it) }
+    }
+
+    companion object {
+        fun inMemory(): AssistanceResponseStore = AssistanceResponseStore(JsonPreferencesStore.inMemory())
     }
 }
 

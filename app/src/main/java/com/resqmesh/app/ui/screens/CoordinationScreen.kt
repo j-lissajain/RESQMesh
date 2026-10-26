@@ -21,6 +21,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +58,8 @@ import com.resqmesh.app.data.LanguagePreference
 import com.resqmesh.app.ui.languageCopy
 import com.resqmesh.app.ui.localizedText
 import com.resqmesh.app.data.bumpContentRevision
+import com.resqmesh.app.security.MeshTrustState
+import com.resqmesh.app.security.PeerTrustStore
 import java.util.UUID
 
 private enum class CoordinationTab { VOLUNTEERS, RESOURCES, RESPONSES, SAFETY }
@@ -89,6 +92,17 @@ fun CoordinationScreen(
         resources = resourceStore.list()
         responses = responseStore.list()
         safety = safetyStore.load()
+    }
+
+    DisposableEffect(meshRelay) {
+        var lastRevision = meshRelay.state.dataRevision
+        val remove = meshRelay.addListener { state ->
+            if (state.dataRevision != lastRevision) {
+                lastRevision = state.dataRevision
+                refresh()
+            }
+        }
+        onDispose(remove)
     }
 
     Column(
@@ -246,6 +260,23 @@ private fun VolunteerSection(
             }
         }
     }
+    val remoteVolunteers = profiles.filter { it.isRemoteUnverified }
+    remoteVolunteers.forEach { remote ->
+        val skillLabels = remote.skills.map { it.localizedText() }
+        val operatingArea = if (remote.operatingArea.isBlank()) stringResource(R.string.not_provided) else remote.operatingArea
+        Card {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("${remote.alias} · ${remote.availability.localizedText()}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.skills_value, skillLabels.joinToString()))
+                Text(stringResource(R.string.operating_area_value, operatingArea))
+                Text(
+                    text = trustSummaryLabel(remote.trustState, remote.originFingerprint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
     Text(stringResource(R.string.nearby_emergency_opportunities), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
     val active = emergencies.filter { it.lifecycleStatus == EmergencyLifecycleStatus.ACTIVE }
     if (active.isEmpty()) Text(stringResource(R.string.no_active_emergency_requests), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -276,6 +307,13 @@ private fun ResourceSection(resources: List<ResourceRecord>, languagePreference:
                 Text(resource.category.localizedText(), fontWeight = FontWeight.Bold)
                 Text("${resource.quantity} ${resource.unit} · ${resource.description}")
                 Text("${resource.availability.localizedText()} · ${resource.approximateArea.ifBlank { stringResource(R.string.area_not_specified) }}")
+                if (resource.isRemoteUnverified) {
+                    Text(
+                        text = trustSummaryLabel(resource.trustState, resource.originFingerprint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 if (resource.availability == ResourceAvailability.AVAILABLE) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                         Button(onClick = { onCommit(resource) }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.commit)) }
@@ -304,6 +342,13 @@ private fun ResponseSection(
                 Text("${response.responderAlias} · ${response.assistanceType.localizedText()}", fontWeight = FontWeight.Bold)
                 Text(response.message.ifBlank { stringResource(R.string.no_message_provided) })
                 Text(response.status.localizedText())
+                if (response.isRemoteUnverified) {
+                    Text(
+                        text = trustSummaryLabel(response.trustState, response.originFingerprint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (response.status == ResponseStatus.OFFERED) {
                         Button(onClick = { onStatus(response, ResponseStatus.ACCEPTED) }) { Text(stringResource(R.string.accept)) }
@@ -418,4 +463,17 @@ private fun ResourceEditorDialog(nodeId: String, alias: String, onDismiss: () ->
          confirmButton = { Button(onClick = { quantity.toDoubleOrNull()?.takeIf { it >= 0 }?.let { amount -> if (description.isNotBlank() && unit.isNotBlank()) onSave(ResourceRecord(providerNodeId = nodeId, providerAlias = alias, category = category, description = description.trim(), quantity = amount, unit = unit.trim(), approximateArea = area.trim())) } }) { Text(stringResource(R.string.save)) } },
          dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } }
     )
+}
+
+private fun trustSummaryLabel(trustState: MeshTrustState, originFingerprint: String?): String {
+    val shortKey = originFingerprint?.let { PeerTrustStore.shortFingerprint(it) }?.takeIf { it.isNotBlank() }
+    return when (trustState) {
+        MeshTrustState.AUTHENTICATED_KNOWN ->
+            if (shortKey != null) "Signed by known device key ($shortKey) · self-declared" else "Signed by known device key · self-declared"
+        MeshTrustState.AUTHENTICATED_UNKNOWN ->
+            if (shortKey != null) "Signed by unknown device key ($shortKey) · self-declared" else "Signed by unknown device key · self-declared"
+        MeshTrustState.LEGACY_UNSIGNED -> "Unsigned mesh record · unverified"
+        MeshTrustState.INVALID -> "Invalid signature"
+        MeshTrustState.LOCAL -> "Local record"
+    }
 }

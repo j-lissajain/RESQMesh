@@ -33,4 +33,5 @@
     <string name="location_status_permission">परवानगी आवश्यक</string><string name="location_status_acquiring">मिळवत आहे</string><string name="location_status_fresh">नवे</string><string name="location_status_stale">जुने/कॅश</string><string name="location_status_low_accuracy">कमी अचूकता</string><string name="location_status_unavailable">अनुपलब्ध</string>
     <string name="map_data_loading_label">स्थानिक OpenStreetMap डेटा लोड होत आहे…</string>
     <string name="map_dataset_description">%1$d स्थानिक OSM एक्स्ट्रॅक्ट · %2$s</string><string name="map_dataset_missing">नागपूर ऑफलाइन नकाशा डेटा अॅप बंडलमध्ये नाही.</string>
+    <string name="content_origin_authenticated">सामग्री स्रोत: डिव्हाइस किल्लीने स्वाक्षरी केलेले (आपत्कालीन दाव्याची स्वतंत्र पडताळणी नाही)</string><string name="received_from_peer_authenticated">जवळच्या पीअरकडून प्राप्त (डिव्हाइस स्वाक्षरी पडताळली; दावा अप्रमाणित)</string>
 </resources>

@@ -1,5 +1,6 @@
 package com.resqmesh.app
 
+import com.resqmesh.app.data.EmergencyContentTrust
 import com.resqmesh.app.data.EmergencyReport
 import com.resqmesh.app.data.EmergencyReportMerge
 import com.resqmesh.app.data.EmergencyReportStatus
@@ -99,5 +100,86 @@ class EmergencyReportMergeTest {
 
         assertEquals(EmergencyReportStatus.TRANSPORT_ACKNOWLEDGED, merged.single().status)
         assertEquals("Fire near the hall", merged.single().description)
+    }
+
+    @Test
+    fun remoteAuthenticatedDoesNotOverwriteLocalOriginatedReportEvenWithHigherRevision() {
+        val local = EmergencyReport(
+            id = "same-id",
+            type = EmergencyType.MEDICAL,
+            severity = EmergencySeverity.CRITICAL,
+            description = "Local emergency",
+            createdAtMillis = 10L,
+            status = EmergencyReportStatus.LOCAL_ONLY,
+            originId = "node-a",
+            contentRevision = 1,
+            contentTrust = EmergencyContentTrust.LOCAL_ORIGINATED
+        )
+        val remoteAuth = local.copy(
+            description = "Remote forged update",
+            status = EmergencyReportStatus.RECEIVED_FROM_PEER,
+            receivedFromPeerId = "peer-b",
+            contentRevision = 3,
+            contentTrust = EmergencyContentTrust.REMOTE_AUTHENTICATED
+        )
+
+        val merged = EmergencyReportMerge.upsert(listOf(local), remoteAuth)
+
+        assertEquals(1, merged.size)
+        assertEquals("Local emergency", merged.single().description)
+        assertEquals(EmergencyContentTrust.LOCAL_ORIGINATED, merged.single().contentTrust)
+        assertEquals(1, merged.single().contentRevision)
+    }
+
+    @Test
+    fun remoteUnverifiedDoesNotOverwriteOrDowngradeRemoteAuthenticated() {
+        val authenticated = EmergencyReport(
+            id = "same-id",
+            type = EmergencyType.MEDICAL,
+            severity = EmergencySeverity.HIGH,
+            description = "Signed emergency",
+            createdAtMillis = 10L,
+            status = EmergencyReportStatus.RECEIVED_FROM_PEER,
+            receivedFromPeerId = "peer-a",
+            contentRevision = 1,
+            contentTrust = EmergencyContentTrust.REMOTE_AUTHENTICATED
+        )
+        val unverifiedHigherRevision = authenticated.copy(
+            description = "Unsigned spoofed revision",
+            receivedFromPeerId = "peer-b",
+            contentRevision = 2,
+            contentTrust = EmergencyContentTrust.REMOTE_UNVERIFIED
+        )
+
+        val merged = EmergencyReportMerge.upsert(listOf(authenticated), unverifiedHigherRevision)
+
+        assertEquals(1, merged.size)
+        assertEquals("Signed emergency", merged.single().description)
+        assertEquals(EmergencyContentTrust.REMOTE_AUTHENTICATED, merged.single().contentTrust)
+        assertEquals(1, merged.single().contentRevision)
+    }
+
+    @Test
+    fun remoteUnverifiedUpgradesToRemoteAuthenticatedOnSameRevision() {
+        val unverified = EmergencyReport(
+            id = "same-id",
+            type = EmergencyType.MEDICAL,
+            severity = EmergencySeverity.HIGH,
+            description = "Emergency report",
+            createdAtMillis = 10L,
+            status = EmergencyReportStatus.RECEIVED_FROM_PEER,
+            receivedFromPeerId = "peer-a",
+            contentRevision = 1,
+            contentTrust = EmergencyContentTrust.REMOTE_UNVERIFIED
+        )
+        val authenticated = unverified.copy(
+            receivedFromPeerId = "peer-b",
+            contentTrust = EmergencyContentTrust.REMOTE_AUTHENTICATED
+        )
+
+        val merged = EmergencyReportMerge.upsert(listOf(unverified), authenticated)
+
+        assertEquals(1, merged.size)
+        assertEquals(EmergencyContentTrust.REMOTE_AUTHENTICATED, merged.single().contentTrust)
     }
 }

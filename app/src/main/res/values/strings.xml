@@ -41,7 +41,7 @@
     <string name="capabilities_help">Optional and self-declared. Separate multiple capabilities with commas.</string>
     <string name="continue_label">Continue</string>
     <string name="save_profile">Save Profile</string>
-    <string name="local_profile_disclaimer">Only this device's local profile is saved in this milestone. No account or cloud sync is used.</string>
+    <string name="local_profile_disclaimer">Only this device\'s local profile is saved in this milestone. No account or cloud sync is used.</string>
 
     <!-- Home -->
     <string name="offline_emergency_coordination">Offline emergency coordination</string>
@@ -382,7 +382,9 @@ Lat: %1$s, Lon: %2$s</string>
     <string name="content_revision">Content revision: %1$d</string>
     <string name="relay_envelope">Relay envelope: hop %1$d, TTL %2$d</string>
     <string name="content_origin_unverified">Content origin: received over BLE and unverified</string>
+    <string name="content_origin_authenticated">Content origin: signed by device key (emergency claim not independently verified)</string>
     <string name="content_origin_local">Content origin: created on this device</string>
+    <string name="received_from_peer_authenticated">Received from nearby peer (device signature verified; claim unverified)</string>
     <string name="created_at">Created: %1$s</string>
     <string name="landmark_value">Landmark / location description: %1$s</string>
     <string name="location_value">Location: %1$s, %2$s</string>

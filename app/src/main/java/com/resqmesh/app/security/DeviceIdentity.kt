@@ -169,14 +169,26 @@ class MeshReplayGuard(private val maxEntries: Int = 512) {
 }
 
 object SecureMeshEnvelopeCodec {
-    private const val DISCRIMINATOR = "RESQSecureMesh"
-    private const val VERSION = 1
-    private const val MAX_BYTES = 1_024
+    const val DISCRIMINATOR = "RESQSecureMesh"
+    const val VERSION = 1
+    const val MAX_PAYLOAD_BYTES = 2_048
+    const val MAX_ENVELOPE_OVERHEAD_BYTES = 512
+    const val MAX_BYTES = 4_096
     private val encoder = Base64.getUrlEncoder().withoutPadding()
     private val decoder = Base64.getUrlDecoder()
 
+    fun maxEncodedSizeForPayload(payloadSize: Int): Int {
+        require(payloadSize >= 0) { "Payload size cannot be negative" }
+        val base64Bytes = ((payloadSize + 2) / 3) * 4
+        return base64Bytes + MAX_ENVELOPE_OVERHEAD_BYTES
+    }
+
     fun encode(payload: ByteArray, identity: DeviceIdentity, nowMillis: Long, ttlMillis: Long): ByteArray {
         require(payload.isNotEmpty()) { "Cannot secure an empty payload" }
+        require(payload.size <= MAX_PAYLOAD_BYTES) {
+            "Payload exceeds maximum secure envelope payload size ($MAX_PAYLOAD_BYTES bytes)"
+        }
+        require(ttlMillis > 0L) { "Secure envelope TTL must be positive" }
         val publicKey = encoder.encodeToString(identity.snapshot.publicKey)
         val fingerprint = identity.snapshot.fingerprint
         val payloadText = encoder.encodeToString(payload)
@@ -201,25 +213,41 @@ object SecureMeshEnvelopeCodec {
         encoded: ByteArray,
         verifier: DeviceIdentity,
         nowMillis: Long,
+        trustStore: PeerTrustStore,
+        legacyPayload: ByteArray? = null
+    ): VerifiedMeshPayload? = decode(
+        encoded = encoded,
+        verifier = verifier,
+        nowMillis = nowMillis,
+        legacyPayload = legacyPayload,
+        isKnownFingerprint = trustStore::isKnown
+    )
+
+    fun decode(
+        encoded: ByteArray,
+        verifier: DeviceIdentity,
+        nowMillis: Long,
         legacyPayload: ByteArray? = null,
         isKnownFingerprint: (String) -> Boolean = { false }
     ): VerifiedMeshPayload? {
-        if (encoded.size > MAX_BYTES) return null
+        if (encoded.isEmpty() || encoded.size > MAX_BYTES) return null
         val fields = runCatching { String(encoded, Charsets.UTF_8).split('|') }.getOrNull()
             ?: return null
         if (fields.firstOrNull() != DISCRIMINATOR) {
-            return legacyPayload?.let {
+            return legacyPayload?.takeIf { it.isNotEmpty() && it.size <= MAX_PAYLOAD_BYTES }?.let {
                 VerifiedMeshPayload(it, null, MeshTrustState.LEGACY_UNSIGNED)
             }
         }
         if (fields.size != 8 || fields[1].toIntOrNull() != VERSION) return null
-        val fingerprint = fields[2]
+        val fingerprint = fields[2].trim().lowercase()
+        if (!PeerTrustStore.isValidFingerprint(fingerprint)) return null
         val publicKey = runCatching { decoder.decode(fields[3]) }.getOrNull() ?: return null
         val issuedAt = fields[4].toLongOrNull() ?: return null
         val expiresAt = fields[5].toLongOrNull() ?: return null
         val payload = runCatching { decoder.decode(fields[6]) }.getOrNull() ?: return null
+        if (payload.isEmpty() || payload.size > MAX_PAYLOAD_BYTES) return null
         val signature = runCatching { decoder.decode(fields[7]) }.getOrNull() ?: return null
-        if (expiresAt <= nowMillis || issuedAt > nowMillis + 5 * 60_000L) return null
+        if (expiresAt <= nowMillis || issuedAt > nowMillis + 5 * 60_000L || expiresAt <= issuedAt) return null
         if (AndroidKeystoreDeviceIdentity.fingerprint(publicKey) != fingerprint) return null
         val canonical = canonical(fingerprint, fields[3], issuedAt, expiresAt, fields[6])
         if (!verifier.verify(publicKey, canonical, signature)) return null
@@ -243,30 +271,87 @@ object SecureMeshEnvelopeCodec {
         .toByteArray(Charsets.UTF_8)
 }
 
-class PeerTrustStore(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences("resqmesh_peer_trust", Context.MODE_PRIVATE)
+class PeerTrustStore private constructor(
+    private val readRaw: () -> String,
+    private val writeRaw: (String) -> Unit
+) {
+    constructor(context: Context) : this(
+        readRaw = {
+            context.applicationContext
+                .getSharedPreferences("resqmesh_peer_trust", Context.MODE_PRIVATE)
+                .getString("fingerprints", "[]") ?: "[]"
+        },
+        writeRaw = { value ->
+            context.applicationContext
+                .getSharedPreferences("resqmesh_peer_trust", Context.MODE_PRIVATE)
+                .edit()
+                .putString("fingerprints", value)
+                .commit()
+        }
+    )
+
     private val lock = Any()
 
     fun isKnown(fingerprint: String): Boolean = synchronized(lock) {
-        val peers = runCatching { JSONArray(preferences.getString("fingerprints", "[]") ?: "[]") }
-            .getOrElse { JSONArray() }
-        (0 until peers.length()).any { peers.optString(it) == fingerprint }
+        val normalized = normalizeFingerprint(fingerprint) ?: return@synchronized false
+        trustedFingerprintsLocked().contains(normalized)
+    }
+
+    fun trustedFingerprints(): List<String> = synchronized(lock) {
+        trustedFingerprintsLocked()
     }
 
     fun trust(fingerprint: String) = synchronized(lock) {
-        if (fingerprint.isBlank() || isKnown(fingerprint)) return@synchronized
-        val peers = runCatching { JSONArray(preferences.getString("fingerprints", "[]") ?: "[]") }
-            .getOrElse { JSONArray() }
-        peers.put(fingerprint)
-        while (peers.length() > 100) peers.remove(0)
-        preferences.edit().putString("fingerprints", peers.toString()).commit()
+        val normalized = normalizeFingerprint(fingerprint) ?: return@synchronized
+        val current = trustedFingerprintsLocked().toMutableList()
+        if (normalized in current) return@synchronized
+        current += normalized
+        while (current.size > MAX_TRUSTED_PEERS) current.removeAt(0)
+        writeRaw(JSONArray(current).toString())
     }
 
     fun forget(fingerprint: String) = synchronized(lock) {
-        val peers = runCatching { JSONArray(preferences.getString("fingerprints", "[]") ?: "[]") }
-            .getOrElse { JSONArray() }
-        val kept = JSONArray()
-        for (i in 0 until peers.length()) if (peers.optString(i) != fingerprint) kept.put(peers.optString(i))
-        preferences.edit().putString("fingerprints", kept.toString()).commit()
+        val normalized = normalizeFingerprint(fingerprint) ?: return@synchronized
+        val kept = trustedFingerprintsLocked().filterNot { it == normalized }
+        writeRaw(JSONArray(kept).toString())
+    }
+
+    private fun trustedFingerprintsLocked(): List<String> {
+        val peers = runCatching { JSONArray(readRaw()) }.getOrElse { JSONArray() }
+        return buildList {
+            for (i in 0 until peers.length()) {
+                normalizeFingerprint(peers.optString(i))?.let { fp ->
+                    if (fp !in this) add(fp)
+                }
+            }
+        }
+    }
+
+    companion object {
+        private const val MAX_TRUSTED_PEERS = 100
+        private const val SHA256_HEX_LENGTH = 64
+
+        fun inMemory(): PeerTrustStore {
+            var raw = "[]"
+            return PeerTrustStore(
+                readRaw = { raw },
+                writeRaw = { raw = it }
+            )
+        }
+
+        fun isValidFingerprint(fingerprint: String): Boolean {
+            val trimmed = fingerprint.trim().lowercase()
+            return trimmed.length == SHA256_HEX_LENGTH &&
+                trimmed.all { it in '0'..'9' || it in 'a'..'f' }
+        }
+
+        fun shortFingerprint(fingerprint: String?): String {
+            val normalized = fingerprint?.let(::normalizeFingerprint)
+                ?: return fingerprint?.trim()?.take(12).orEmpty()
+            return normalized.take(16).chunked(4).joinToString(":")
+        }
+
+        private fun normalizeFingerprint(fingerprint: String): String? =
+            fingerprint.trim().lowercase().takeIf(::isValidFingerprint)
     }
 }

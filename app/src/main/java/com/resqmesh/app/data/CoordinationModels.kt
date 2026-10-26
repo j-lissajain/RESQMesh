@@ -38,7 +38,9 @@ data class VolunteerProfile(
     val revision: Int = EmergencyRevisionRules.INITIAL_REVISION,
     val updatedAtMillis: Long = System.currentTimeMillis(),
     val expiresAtMillis: Long? = null,
-    val isRemoteUnverified: Boolean = false
+    val isRemoteUnverified: Boolean = false,
+    val trustState: MeshTrustState = MeshTrustState.LOCAL,
+    val originFingerprint: String? = null
 )
 
 enum class ResourceCategory(val label: String) {
@@ -80,7 +82,9 @@ data class ResourceRecord(
     val updatedAtMillis: Long = createdAtMillis,
     val revision: Int = EmergencyRevisionRules.INITIAL_REVISION,
     val expiresAtMillis: Long? = null,
-    val isRemoteUnverified: Boolean = false
+    val isRemoteUnverified: Boolean = false,
+    val trustState: MeshTrustState = MeshTrustState.LOCAL,
+    val originFingerprint: String? = null
 )
 
 enum class ResponseStatus(val label: String) {
@@ -103,7 +107,9 @@ data class AssistanceResponse(
     val createdAtMillis: Long = System.currentTimeMillis(),
     val updatedAtMillis: Long = createdAtMillis,
     val revision: Int = EmergencyRevisionRules.INITIAL_REVISION,
-    val isRemoteUnverified: Boolean = false
+    val isRemoteUnverified: Boolean = false,
+    val trustState: MeshTrustState = MeshTrustState.LOCAL,
+    val originFingerprint: String? = null
 )
 
 data class TrustedContact(
@@ -147,13 +153,20 @@ data class MeshRecord(
 object MeshRecordCodec {
     const val DISCRIMINATOR = "RESQMeshRecord"
     const val SCHEMA_VERSION = 1
-    const val MAX_BYTES = 1024
+    const val MAX_BYTES = 2048
     private const val FIELD_COUNT = 12
     private val encoder = Base64.getUrlEncoder().withoutPadding()
     private val decoder = Base64.getUrlDecoder()
 
     fun encode(record: MeshRecord): ByteArray {
-        require(validate(record) == null) { validate(record) ?: "Invalid mesh record" }
+        val validationError = validate(record)
+        require(validationError == null) { validationError ?: "Invalid mesh record" }
+        return encodeUnchecked(record).also {
+            require(it.size <= MAX_BYTES) { "Mesh record payload is too large" }
+        }
+    }
+
+    private fun encodeUnchecked(record: MeshRecord): ByteArray {
         val fields = listOf(
             DISCRIMINATOR,
             SCHEMA_VERSION.toString(),
@@ -168,9 +181,7 @@ object MeshRecordCodec {
             record.lastHopId?.let(::encodeText) ?: "-",
             encodeText(record.body.toString())
         )
-        return fields.joinToString("|").toByteArray(StandardCharsets.UTF_8).also {
-            require(it.size <= MAX_BYTES) { "Mesh record payload is too large" }
-        }
+        return fields.joinToString("|").toByteArray(StandardCharsets.UTF_8)
     }
 
     fun decode(payload: ByteArray): MeshRecord? {
@@ -200,7 +211,10 @@ object MeshRecordCodec {
         if (record.originId.isBlank() || record.originId.length > 100) return "Invalid origin ID"
         if (!EmergencyRevisionRules.isValid(record.revision)) return "Invalid record revision"
         if (record.createdAtMillis <= 0L || record.updatedAtMillis < record.createdAtMillis) return "Invalid timestamps"
-        return EmergencyEnvelopeRules.validate(record.hopCount, record.remainingTtl, record.lastHopId)
+        val envelopeError = EmergencyEnvelopeRules.validate(record.hopCount, record.remainingTtl, record.lastHopId)
+        if (envelopeError != null) return envelopeError
+        if (encodeUnchecked(record).size > MAX_BYTES) return "Mesh record payload is too large"
+        return null
     }
 
     fun nextHop(record: MeshRecord, localNodeId: String): MeshRecord? {
@@ -291,6 +305,7 @@ fun JSONObject.toVolunteerProfile(record: MeshRecord): VolunteerProfile? = runCa
             runCatching { VolunteerSkill.valueOf(values.optString(index)) }.getOrNull()?.let(::add)
         }
     }
+    val remoteUnverified = optBoolean("remote_unverified", true)
     VolunteerProfile(
         id = record.recordId,
         nodeId = optString("node_id", record.originId),
@@ -305,11 +320,14 @@ fun JSONObject.toVolunteerProfile(record: MeshRecord): VolunteerProfile? = runCa
         revision = record.revision,
         updatedAtMillis = record.updatedAtMillis,
         expiresAtMillis = if (has("expires_at")) optLong("expires_at") else null,
-        isRemoteUnverified = optBoolean("remote_unverified", true)
+        isRemoteUnverified = remoteUnverified,
+        trustState = if (!remoteUnverified) MeshTrustState.LOCAL else record.trustState,
+        originFingerprint = record.originFingerprint
     ).takeIf { it.alias.isNotBlank() && it.skills.isNotEmpty() }
 }.getOrNull()
 
 fun JSONObject.toResourceRecord(record: MeshRecord): ResourceRecord? = runCatching {
+    val remoteUnverified = optBoolean("remote_unverified", true)
     ResourceRecord(
         id = record.recordId,
         providerNodeId = optString("provider_node_id", record.originId),
@@ -325,11 +343,14 @@ fun JSONObject.toResourceRecord(record: MeshRecord): ResourceRecord? = runCatchi
         updatedAtMillis = record.updatedAtMillis,
         revision = record.revision,
         expiresAtMillis = if (has("expires_at")) optLong("expires_at") else null,
-        isRemoteUnverified = optBoolean("remote_unverified", true)
+        isRemoteUnverified = remoteUnverified,
+        trustState = if (!remoteUnverified) MeshTrustState.LOCAL else record.trustState,
+        originFingerprint = record.originFingerprint
     ).takeIf { it.description.isNotBlank() && it.quantity >= 0.0 && it.unit.isNotBlank() }
 }.getOrNull()
 
 fun JSONObject.toAssistanceResponse(record: MeshRecord): AssistanceResponse? = runCatching {
+    val remoteUnverified = optBoolean("remote_unverified", true)
     AssistanceResponse(
         id = record.recordId,
         emergencyId = optString("emergency_id").trim(),
@@ -341,6 +362,8 @@ fun JSONObject.toAssistanceResponse(record: MeshRecord): AssistanceResponse? = r
         createdAtMillis = record.createdAtMillis,
         updatedAtMillis = record.updatedAtMillis,
         revision = record.revision,
-        isRemoteUnverified = optBoolean("remote_unverified", true)
+        isRemoteUnverified = remoteUnverified,
+        trustState = if (!remoteUnverified) MeshTrustState.LOCAL else record.trustState,
+        originFingerprint = record.originFingerprint
     ).takeIf { it.emergencyId.isNotBlank() && it.responderNodeId.isNotBlank() }
 }.getOrNull()

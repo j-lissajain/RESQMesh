@@ -65,7 +65,9 @@ data class ChatMessage(
     val isIncoming: Boolean,
     val state: MessageDeliveryState,
     val kind: ChatMessageKind = ChatMessageKind.CHAT,
-    val emergencyId: String? = null
+    val emergencyId: String? = null,
+    val trustState: MeshTrustState = MeshTrustState.LOCAL,
+    val senderFingerprint: String? = null
 )
 
 enum class ChatMessageKind {
@@ -89,6 +91,10 @@ data class BleMessagingState(
     val connectedPeerIds: Set<String> = emptySet(),
     val messages: List<ChatMessage> = emptyList(),
     val emergencyTransmissions: Map<String, EmergencyTransmissionState> = emptyMap(),
+    val localIdentityFingerprint: String? = null,
+    val peerFingerprints: Map<String, String> = emptyMap(),
+    val peerTrustStates: Map<String, MeshTrustState> = emptyMap(),
+    val trustedFingerprints: Set<String> = emptySet(),
     val error: String? = null
 )
 
@@ -108,6 +114,8 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
     private val receivedMessageIds = LinkedHashSet<Long>()
     private val messages = ArrayDeque<ChatMessage>()
     private val pendingEmergencyIds = LinkedHashMap<Long, String>()
+    private val peerFingerprints = LinkedHashMap<String, String>()
+    private val peerTrustStates = LinkedHashMap<String, MeshTrustState>()
     private var emergencyReceiver: ((EmergencyReport, String?) -> Unit)? = null
     private var meshRecordReceiver: ((MeshRecord, String?, MeshTrustState) -> Unit)? = null
     private val deviceIdentity by lazy { AndroidKeystoreDeviceIdentity(appContext) }
@@ -245,6 +253,30 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
         meshRecordReceiver = receiver
     }
 
+    fun trustPeerFingerprint(fingerprint: String) {
+        if (closed || !PeerTrustStore.isValidFingerprint(fingerprint)) return
+        peerTrustStore.trust(fingerprint)
+        val normalized = fingerprint.trim().lowercase()
+        peerFingerprints.forEach { (peerId, fp) ->
+            if (fp == normalized) {
+                peerTrustStates[peerId] = MeshTrustState.AUTHENTICATED_KNOWN
+            }
+        }
+        publish(_state)
+    }
+
+    fun forgetPeerFingerprint(fingerprint: String) {
+        if (closed || !PeerTrustStore.isValidFingerprint(fingerprint)) return
+        peerTrustStore.forget(fingerprint)
+        val normalized = fingerprint.trim().lowercase()
+        peerFingerprints.forEach { (peerId, fp) ->
+            if (fp == normalized) {
+                peerTrustStates[peerId] = MeshTrustState.AUTHENTICATED_UNKNOWN
+            }
+        }
+        publish(_state)
+    }
+
     fun selectPeer(peerId: String) {
         selectedPeerId = peerId
         publish(_state.copy(selectedPeerId = peerId))
@@ -367,7 +399,7 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
             updateError("Enter a message before sending.")
             return
         }
-        if (payload.size > BleMessageProtocol.MAX_MESSAGE_BYTES) {
+        if (payload.size > BleMessageProtocol.MAX_CHAT_MESSAGE_BYTES) {
             updateError("Message is too large. Keep messages under 1024 UTF-8 bytes.")
             return
         }
@@ -451,7 +483,12 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
                 nowMillis = System.currentTimeMillis(),
                 ttlMillis = 24L * 60L * 60L * 1_000L
             )
-        }.getOrElse { return false }
+        }.getOrElse { error ->
+            val message = error.message ?: "Mesh record could not be encoded for BLE transmission."
+            updateError(message)
+            callback(EmergencyTransportResult.FAILED, message)
+            return false
+        }
         val messageId = BleMessageProtocol.newMessageId()
         appendMessage(
             ChatMessage(
@@ -472,7 +509,10 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
         pendingMessages[messageId] = pending
         if (!sendFrame(route, BleFrameType.MESSAGE, messageId, payload)) {
             pendingMessages.remove(messageId)
-            callback(EmergencyTransportResult.FAILED, "Mesh record could not be queued.")
+            updateMessageState(messageId, MessageDeliveryState.FAILED)
+            val message = "Mesh record could not be queued for BLE delivery."
+            updateError(message)
+            callback(EmergencyTransportResult.FAILED, message)
             return false
         }
         scheduleAckTimeout(pending)
@@ -492,14 +532,16 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
                 ttlMillis = 24L * 60L * 60L * 1_000L
             )
         }
-            .getOrElse {
+            .getOrElse { error ->
+                val message = error.message ?: "This emergency could not be encoded for BLE transmission."
                 publish(
                     _state.copy(
                         emergencyTransmissions = _state.emergencyTransmissions +
                             (report.id to EmergencyTransmissionState.FAILED),
-                        error = "This emergency could not be encoded for BLE transmission."
+                        error = message
                     )
                 )
+                callback?.invoke(EmergencyTransportResult.FAILED, message)
                 return false
             }
         val messageId = BleMessageProtocol.newMessageId()
@@ -931,7 +973,7 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
 
     private fun handleIncomingMessage(messageId: Long, payload: ByteArray, route: RouteRef) {
         val text = BleMessageProtocol.decodeUtf8(payload) ?: return
-        if (text.toByteArray(StandardCharsets.UTF_8).size > BleMessageProtocol.MAX_MESSAGE_BYTES) return
+        if (payload.size > BleMessageProtocol.MAX_MESSAGE_BYTES) return
 
         if (!receivedMessageIds.add(messageId)) {
             sendAcknowledgement(route, messageId)
@@ -944,7 +986,8 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
             }
         }
 
-        val secureMesh = if (payload.toString(Charsets.UTF_8).startsWith("RESQSecureMesh")) {
+        val isSecureEnvelope = text.startsWith(SecureMeshEnvelopeCodec.DISCRIMINATOR)
+        val secureMesh = if (isSecureEnvelope) {
             SecureMeshEnvelopeCodec.decode(
                 encoded = payload,
                 verifier = deviceIdentity,
@@ -954,19 +997,26 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
         } else {
             null
         }
-        if (payload.toString(Charsets.UTF_8).startsWith("RESQSecureMesh") && secureMesh == null) {
-            updateError("An invalid or expired authenticated coordination message was rejected.")
+        if (isSecureEnvelope && secureMesh == null) {
+            route.peerId?.let { peerTrustStates[it] = MeshTrustState.INVALID }
+            updateError("An invalid or expired authenticated message was rejected.")
             return
         }
         if (secureMesh != null && !replayGuard.accept(secureMesh)) {
+            route.peerId?.let { peerTrustStates[it] = MeshTrustState.INVALID }
             updateError("An authenticated message replay was rejected.")
             return
+        }
+        val messageTrust = secureMesh?.trustState ?: MeshTrustState.LEGACY_UNSIGNED
+        route.peerId?.let { peerId ->
+            secureMesh?.fingerprint?.let { fp -> peerFingerprints[peerId] = fp }
+            peerTrustStates[peerId] = messageTrust
         }
         val contentPayload = secureMesh?.payload ?: payload
         val emergency = EmergencyWireCodec.decode(contentPayload)
         val meshRecord = MeshRecordCodec.decode(contentPayload)?.let { record ->
             record.copy(
-                trustState = secureMesh?.trustState ?: MeshTrustState.LEGACY_UNSIGNED,
+                trustState = messageTrust,
                 originFingerprint = secureMesh?.fingerprint
             )
         }
@@ -979,12 +1029,17 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
             updateError("A malformed or unsupported coordination record was rejected.")
             return
         }
+        if (!isSecureEnvelope && emergency == null && meshRecord == null &&
+            contentPayload.size > BleMessageProtocol.MAX_CHAT_MESSAGE_BYTES
+        ) {
+            return
+        }
         if (meshRecord != null) {
             meshRecordReceiver?.invoke(meshRecord, route.peerId, meshRecord.trustState)
         }
         val incomingText = if (emergency != null) {
             emergencyReceiver?.invoke(
-                EmergencyWireCodec.toReceivedReport(emergency, route.peerId, secureMesh?.trustState ?: MeshTrustState.LEGACY_UNSIGNED),
+                EmergencyWireCodec.toReceivedReport(emergency, route.peerId, messageTrust),
                 route.peerId
             )
             "Emergency report ${emergency.emergencyId} received"
@@ -1000,7 +1055,9 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
                 isIncoming = true,
                 state = MessageDeliveryState.RECEIVED,
                 kind = if (emergency == null) ChatMessageKind.CHAT else ChatMessageKind.EMERGENCY,
-                emergencyId = emergency?.emergencyId
+                emergencyId = emergency?.emergencyId,
+                trustState = messageTrust,
+                senderFingerprint = secureMesh?.fingerprint
             )
         )
         sendAcknowledgement(route, messageId)
@@ -1606,8 +1663,14 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
     }
 
     private fun publish(newState: BleMessagingState) {
-        _state = newState
-        val snapshot = newState
+        val enrichedState = newState.copy(
+            localIdentityFingerprint = runCatching { deviceIdentity.snapshot.fingerprint }.getOrNull(),
+            peerFingerprints = peerFingerprints.toMap(),
+            peerTrustStates = peerTrustStates.toMap(),
+            trustedFingerprints = peerTrustStore.trustedFingerprints().toSet()
+        )
+        _state = enrichedState
+        val snapshot = enrichedState
         if (Looper.myLooper() == Looper.getMainLooper()) {
             listeners.toList().forEach { listener -> listener(snapshot) }
         } else {

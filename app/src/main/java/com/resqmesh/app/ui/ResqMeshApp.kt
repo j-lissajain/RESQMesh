@@ -155,6 +155,7 @@ fun ResqMeshApp() {
     var languagePreference by remember { mutableStateOf(languageStore.load()) }
     var accessibilityPreferences by remember { mutableStateOf(accessibilityStore.load()) }
     var reports by remember { mutableStateOf(emergencyRepository.list()) }
+    var assistanceResponses by remember { mutableStateOf(responseStore.list()) }
     var relayState by remember { mutableStateOf(relayController.state) }
     var mapDataset by remember { mutableStateOf<OfflineMapDataset?>(null) }
     var locationState by remember { mutableStateOf<LocationEngineState>(locationEngine.state) }
@@ -188,7 +189,12 @@ fun ResqMeshApp() {
     DisposableEffect(accessibilityFeedback) { onDispose { accessibilityFeedback.close() } }
     DisposableEffect(meshRelay) {
         meshRelay.setReceiver()
+        val remove = meshRelay.addListener {
+            reports = emergencyRepository.list()
+            assistanceResponses = responseStore.list()
+        }
         onDispose {
+            remove()
             meshRelay.close()
             messagingManager.setMeshRecordReceiver(null)
         }
@@ -332,6 +338,7 @@ fun ResqMeshApp() {
                                 emergencyRepository.list().firstOrNull { it.id == id }?.let { report ->
                                     val cancelled = report.withLifecycleStatus(com.resqmesh.app.data.EmergencyLifecycleStatus.CANCELLED)
                                     emergencyRepository.save(cancelled)
+                                    relayController.enqueue(cancelled)
                                     meshRelay.enqueueEmergencyLifecycleUpdate(cancelled)
                                     reports = emergencyRepository.list()
                                 }
@@ -366,6 +373,7 @@ fun ResqMeshApp() {
                         onLifecycleChange = { report, status ->
                             val updated = report.withLifecycleStatus(status)
                             emergencyRepository.save(updated)
+                            relayController.enqueue(updated)
                             meshRelay.enqueueEmergencyLifecycleUpdate(updated)
                             reports = emergencyRepository.list()
                         },
@@ -373,11 +381,12 @@ fun ResqMeshApp() {
                             if (EmergencyReportValidation.isDescriptionValid(description)) {
                                 val updated = report.copy(description = description).bumpContentRevision()
                                 emergencyRepository.save(updated)
+                                relayController.enqueue(updated)
                                 meshRelay.enqueueEmergencyLifecycleUpdate(updated)
                                 reports = emergencyRepository.list()
                             }
                         },
-                        assistanceResponses = responseStore.list(),
+                        assistanceResponses = assistanceResponses,
                         simplifiedEmergencyMode = accessibilityPreferences.simplifiedEmergencyMode,
                         languagePreference = languagePreference,
                         modifier = Modifier

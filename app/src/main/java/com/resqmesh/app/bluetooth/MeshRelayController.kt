@@ -2,8 +2,12 @@ package com.resqmesh.app.bluetooth
 
 import com.resqmesh.app.data.AssistanceResponse
 import com.resqmesh.app.data.AssistanceResponseStore
+import com.resqmesh.app.data.EmergencyContentTrust
 import com.resqmesh.app.data.EmergencyReport
+import com.resqmesh.app.data.EmergencyReportMerge
 import com.resqmesh.app.data.EmergencyReportRepository
+import com.resqmesh.app.data.EmergencyReportStatus
+import com.resqmesh.app.data.EmergencyReportValidation
 import com.resqmesh.app.data.EmergencyRevisionRules
 import com.resqmesh.app.data.MeshRecord
 import com.resqmesh.app.data.MeshRecordCodec
@@ -37,8 +41,25 @@ data class MeshQueueEntry(
     val lastError: String? = null
 )
 
-class MeshRecordQueueStore(context: android.content.Context) : MeshRecordQueueRepository {
-    private val preferences = context.applicationContext.getSharedPreferences("resqmesh_mesh_queue", android.content.Context.MODE_PRIVATE)
+class MeshRecordQueueStore private constructor(
+    private val readRaw: () -> String,
+    private val writeRaw: (String) -> Unit
+) : MeshRecordQueueRepository {
+    constructor(context: android.content.Context) : this(
+        readRaw = {
+            context.applicationContext
+                .getSharedPreferences("resqmesh_mesh_queue", android.content.Context.MODE_PRIVATE)
+                .getString("entries", "[]") ?: "[]"
+        },
+        writeRaw = { value ->
+            context.applicationContext
+                .getSharedPreferences("resqmesh_mesh_queue", android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putString("entries", value)
+                .commit()
+        }
+    )
+
     private val lock = Any()
 
     override fun list(nowMillis: Long): List<MeshRecord> = synchronized(lock) {
@@ -52,6 +73,7 @@ class MeshRecordQueueStore(context: android.content.Context) : MeshRecordQueueRe
     }
 
     override fun upsert(record: MeshRecord, expiresAtMillis: Long): MeshRecord? = synchronized(lock) {
+        if (MeshRecordCodec.validate(record) != null) return@synchronized null
         val entries = loadEntries().toMutableList()
         val index = entries.indexOfFirst { it.record.recordId == record.recordId }
         if (index < 0) entries += MeshQueueEntry(record, expiresAtMillis)
@@ -77,7 +99,7 @@ class MeshRecordQueueStore(context: android.content.Context) : MeshRecordQueueRe
     }
 
     private fun loadEntries(): List<MeshQueueEntry> = runCatching {
-        val array = org.json.JSONArray(preferences.getString("entries", "[]") ?: "[]")
+        val array = org.json.JSONArray(readRaw())
         buildList {
             for (i in 0 until array.length()) {
                 val item = array.optJSONObject(i) ?: continue
@@ -98,8 +120,11 @@ class MeshRecordQueueStore(context: android.content.Context) : MeshRecordQueueRe
     private fun persist(entries: List<MeshQueueEntry>) {
         val array = org.json.JSONArray().apply {
             entries.distinctBy { it.record.recordId }.take(MAX_ENTRIES).forEach { entry ->
+                val encodedPayload = runCatching {
+                    String(MeshRecordCodec.encode(entry.record), Charsets.UTF_8)
+                }.getOrNull() ?: return@forEach
                 put(org.json.JSONObject().apply {
-                    put("payload", String(MeshRecordCodec.encode(entry.record), Charsets.UTF_8))
+                    put("payload", encodedPayload)
                     put("expires_at", entry.expiresAtMillis)
                     put("attempts", org.json.JSONObject().apply { entry.attemptsByPeer.forEach { (k, v) -> put(k, v) } })
                     put("acks", org.json.JSONArray(entry.acknowledgedPeers.toList()))
@@ -107,35 +132,85 @@ class MeshRecordQueueStore(context: android.content.Context) : MeshRecordQueueRe
                 })
             }
         }
-        preferences.edit().putString("entries", array.toString()).commit()
+        writeRaw(array.toString())
     }
 
-    private companion object { const val MAX_ENTRIES = 150 }
+    companion object {
+        private const val MAX_ENTRIES = 150
+
+        fun inMemory(): MeshRecordQueueStore {
+            var raw = "[]"
+            return MeshRecordQueueStore(
+                readRaw = { raw },
+                writeRaw = { raw = it }
+            )
+        }
+    }
 }
 
-class MeshSeenStore(context: android.content.Context) {
-    private val preferences = context.applicationContext.getSharedPreferences("resqmesh_mesh_seen", android.content.Context.MODE_PRIVATE)
+class MeshSeenStore private constructor(
+    private val readRaw: () -> String,
+    private val writeRaw: (String) -> Unit
+) {
+    constructor(context: android.content.Context) : this(
+        readRaw = {
+            context.applicationContext
+                .getSharedPreferences("resqmesh_mesh_seen", android.content.Context.MODE_PRIVATE)
+                .getString("keys", "[]") ?: "[]"
+        },
+        writeRaw = { value ->
+            context.applicationContext
+                .getSharedPreferences("resqmesh_mesh_seen", android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putString("keys", value)
+                .commit()
+        }
+    )
+
     private val lock = Any()
 
     fun recordIfNew(record: MeshRecord): Boolean = synchronized(lock) {
         val seen = runCatching {
-            org.json.JSONArray(preferences.getString("keys", "[]") ?: "[]")
+            org.json.JSONArray(readRaw())
         }.getOrElse { org.json.JSONArray() }
         val key = record.key
         for (i in 0 until seen.length()) if (seen.optString(i) == key) return@synchronized false
         seen.put(key)
         while (seen.length() > MAX_ENTRIES) seen.remove(0)
-        preferences.edit().putString("keys", seen.toString()).commit()
+        writeRaw(seen.toString())
         true
     }
 
-    private companion object { const val MAX_ENTRIES = 500 }
+    companion object {
+        private const val MAX_ENTRIES = 500
+
+        fun inMemory(): MeshSeenStore {
+            var raw = "[]"
+            return MeshSeenStore(
+                readRaw = { raw },
+                writeRaw = { raw = it }
+            )
+        }
+    }
+}
+
+private class MainThreadMeshScheduler : RelayScheduler {
+    private val handler = Handler(Looper.getMainLooper())
+
+    override fun post(delayMillis: Long, action: () -> Unit) {
+        handler.postDelayed(action, delayMillis)
+    }
+
+    override fun cancelAll() {
+        handler.removeCallbacksAndMessages(null)
+    }
 }
 
 data class MeshRelayState(
     val queued: Int = 0,
     val waitingForPeer: Int = 0,
-    val lastError: String? = null
+    val lastError: String? = null,
+    val dataRevision: Long = 0L
 )
 
 class MeshRelayController(
@@ -147,13 +222,15 @@ class MeshRelayController(
     private val resourceStore: ResourceStore,
     private val responseStore: AssistanceResponseStore,
     private val emergencyRepository: EmergencyReportRepository,
-    private val nowMillis: () -> Long = System::currentTimeMillis
+    private val nowMillis: () -> Long = System::currentTimeMillis,
+    private val scheduler: RelayScheduler = MainThreadMeshScheduler()
 ) : AutoCloseable {
-    private val handler = Handler(Looper.getMainLooper())
     private val listeners = mutableSetOf<(MeshRelayState) -> Unit>()
     private val inFlight = mutableSetOf<String>()
     private var removeConnectionListener: (() -> Unit)? = null
     private var closed = false
+    private var dataRevision = 0L
+    private var lastErrorOverride: String? = null
     private var _state = MeshRelayState()
 
     init {
@@ -170,13 +247,23 @@ class MeshRelayController(
     }
 
     fun setReceiver() {
-        transport.setMeshRecordReceiver { record, peerId, trust -> onIncoming(record.copy(trustState = trust), peerId) }
+        transport.setMeshRecordReceiver { record, peerId, trust ->
+            onIncoming(record.copy(trustState = trust), peerId)
+        }
     }
 
-    fun enqueue(record: MeshRecord, excludedPeerId: String? = null) {
-        if (closed || MeshRecordCodec.validate(record) != null) return
-        queue.upsert(record, nowMillis() + QUEUE_TTL_MILLIS)
+    fun enqueue(record: MeshRecord, excludedPeerId: String? = null): Boolean {
+        if (closed) return false
+        val validationError = MeshRecordCodec.validate(record)
+        if (validationError != null) {
+            lastErrorOverride = validationError
+            publish()
+            return false
+        }
+        queue.upsert(record, nowMillis() + QUEUE_TTL_MILLIS) ?: return false
+        lastErrorOverride = null
         pump(excludedPeerId)
+        return true
     }
 
     fun enqueueVolunteer(profile: VolunteerProfile) = enqueue(profile.toMeshRecord())
@@ -195,6 +282,7 @@ class MeshRelayController(
                 body = org.json.JSONObject().apply {
                     put("emergency_id", report.id)
                     put("lifecycle_status", report.lifecycleStatus.name)
+                    put("description", report.description)
                 }
             )
         )
@@ -206,9 +294,11 @@ class MeshRelayController(
             MeshRecordType.VOLUNTEER -> record.body.toVolunteerProfile(record)?.let(volunteerStore::save)
             MeshRecordType.RESOURCE -> record.body.toResourceRecord(record)?.let(resourceStore::save)
             MeshRecordType.RESPONSE -> record.body.toAssistanceResponse(record)?.let(responseStore::save)
-            MeshRecordType.EMERGENCY_UPDATE -> receiveEmergencyUpdate(record)
+            MeshRecordType.EMERGENCY_UPDATE -> receiveEmergencyUpdate(record, peerId)
             MeshRecordType.SYNC_SUMMARY -> receiveSyncSummary(record, peerId)
         }
+        dataRevision++
+        publish()
         val next = MeshRecordCodec.nextHop(record, localNodeId) ?: return
         enqueue(next, peerId)
         publish()
@@ -219,20 +309,34 @@ class MeshRelayController(
     override fun close() {
         closed = true
         removeConnectionListener?.invoke()
-        handler.removeCallbacksAndMessages(null)
+        scheduler.cancelAll()
         listeners.clear()
     }
 
-    private fun receiveEmergencyUpdate(record: MeshRecord) {
+    private fun receiveEmergencyUpdate(record: MeshRecord, peerId: String?) {
         val emergencyId = record.body.optString("emergency_id")
-        val report = emergencyRepository.list().firstOrNull { it.id == emergencyId }
-        val status = com.resqmesh.app.data.EmergencyLifecycleStatus.fromStoredValue(record.body.optString("lifecycle_status")) ?: return
-        val base = report ?: record.body.optJSONObject("report")?.let(EmergencyReportJsonCodec::decode) ?: return
+        val existing = emergencyRepository.list().firstOrNull { it.id == emergencyId }
+        if (existing != null && EmergencyReportMerge.isTrustedLocalContent(existing)) return
+        val status = EmergencyLifecycleStatus.fromStoredValue(record.body.optString("lifecycle_status")) ?: return
+        val base = existing ?: record.body.optJSONObject("report")?.let(EmergencyReportJsonCodec::decode) ?: return
+        val updatedDescription = record.body.optString("description").trim()
+            .takeIf { EmergencyReportValidation.isDescriptionValid(it) }
+            ?: base.description
+        val incomingTrust = if (record.trustState == MeshTrustState.AUTHENTICATED_KNOWN ||
+            record.trustState == MeshTrustState.AUTHENTICATED_UNKNOWN
+        ) {
+            EmergencyContentTrust.REMOTE_AUTHENTICATED
+        } else {
+            EmergencyContentTrust.REMOTE_UNVERIFIED
+        }
         val updated = base.copy(
+            description = updatedDescription,
+            status = EmergencyReportStatus.RECEIVED_FROM_PEER,
+            receivedFromPeerId = base.receivedFromPeerId ?: peerId ?: record.originId,
             lifecycleStatus = status,
             contentRevision = record.revision,
             updatedAtMillis = record.updatedAtMillis,
-            contentTrust = com.resqmesh.app.data.EmergencyContentTrust.REMOTE_UNVERIFIED
+            contentTrust = incomingTrust
         )
         emergencyRepository.save(updated)
     }
@@ -251,26 +355,37 @@ class MeshRelayController(
         resourceStore.list().filter { !it.isRemoteUnverified }.forEach { add(it.toMeshRecord()) }
         responseStore.list().filter { !it.isRemoteUnverified }.forEach { add(it.toMeshRecord()) }
         emergencyRepository.list()
-            .filter { it.contentTrust == com.resqmesh.app.data.EmergencyContentTrust.LOCAL_ORIGINATED }
+            .filter { it.contentTrust == EmergencyContentTrust.LOCAL_ORIGINATED }
             .forEach { add(emergencyToMeshRecord(it)) }
     }
 
-    private fun emergencyToMeshRecord(report: EmergencyReport): MeshRecord = MeshRecord(
-        recordId = report.id,
-        type = MeshRecordType.EMERGENCY_UPDATE,
-        originId = report.originId ?: localNodeId,
-        revision = report.contentRevision,
-        createdAtMillis = report.createdAtMillis,
-        updatedAtMillis = report.updatedAtMillis,
-        body = org.json.JSONObject().apply {
-            put("emergency_id", report.id)
-            put("lifecycle_status", report.lifecycleStatus.name)
-            put("report", EmergencyReportJsonCodec.encode(report))
-        }
-    )
+    private fun emergencyToMeshRecord(report: EmergencyReport): MeshRecord {
+        val withFullReport = MeshRecord(
+            recordId = report.id,
+            type = MeshRecordType.EMERGENCY_UPDATE,
+            originId = report.originId ?: localNodeId,
+            revision = report.contentRevision,
+            createdAtMillis = report.createdAtMillis,
+            updatedAtMillis = report.updatedAtMillis,
+            body = org.json.JSONObject().apply {
+                put("emergency_id", report.id)
+                put("lifecycle_status", report.lifecycleStatus.name)
+                put("description", report.description)
+                put("report", EmergencyReportJsonCodec.encode(report))
+            }
+        )
+        if (MeshRecordCodec.validate(withFullReport) == null) return withFullReport
+        return withFullReport.copy(
+            body = org.json.JSONObject().apply {
+                put("emergency_id", report.id)
+                put("lifecycle_status", report.lifecycleStatus.name)
+                put("description", report.description)
+            }
+        )
+    }
 
     private fun enqueueSyncSummary() {
-        val keys = allLocalRecords().map { it.key }
+        val keys = allLocalRecords().map { it.key }.take(MAX_SYNC_KEYS)
         val summary = MeshRecord(
             recordId = "sync-$localNodeId",
             type = MeshRecordType.SYNC_SUMMARY,
@@ -295,7 +410,7 @@ class MeshRelayController(
                 it.copy(attemptsByPeer = it.attemptsByPeer + (peer to ((it.attemptsByPeer[peer] ?: 0) + 1)))
             }
             val accepted = transport.sendMeshRecordToPeer(entry.record, peer) { result, error ->
-                handler.post {
+                scheduler.post(0L) {
                     inFlight.remove(entry.record.key)
                     queue.update(entry.record.key) { current ->
                         if (result == EmergencyTransportResult.ACKNOWLEDGED) {
@@ -303,7 +418,7 @@ class MeshRelayController(
                         } else current.copy(lastError = error ?: result.name)
                     }
                     publish()
-                    handler.postDelayed({ pump() }, BACKOFF_MILLIS)
+                    scheduler.post(BACKOFF_MILLIS) { pump() }
                 }
             }
             if (!accepted) inFlight.remove(entry.record.key)
@@ -317,7 +432,8 @@ class MeshRelayController(
         _state = MeshRelayState(
             queued = entries.size,
             waitingForPeer = entries.count { entry -> peers.none { it !in entry.acknowledgedPeers } },
-            lastError = entries.lastOrNull()?.lastError
+            lastError = lastErrorOverride ?: entries.lastOrNull()?.lastError,
+            dataRevision = dataRevision
         )
         listeners.toList().forEach { it(_state) }
     }
@@ -326,5 +442,6 @@ class MeshRelayController(
         const val MAX_ATTEMPTS = 5
         const val BACKOFF_MILLIS = 2_000L
         const val QUEUE_TTL_MILLIS = 24L * 60L * 60L * 1_000L
+        const val MAX_SYNC_KEYS = 24
     }
 }

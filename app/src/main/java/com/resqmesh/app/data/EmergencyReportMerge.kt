@@ -5,17 +5,21 @@ object EmergencyReportMerge {
         val current = existing.firstOrNull { sameEmergency(it, incoming) }
         val merged = when {
             current == null -> incoming
+            isTrustedLocalContent(current) && isRemoteContent(incoming) -> current
             incoming.contentRevision < current.contentRevision -> current
             incoming.contentRevision > current.contentRevision -> {
-                if (isTrustedLocalContent(current) && isUnverifiedRemoteContent(incoming)) {
+                if (current.contentTrust == EmergencyContentTrust.REMOTE_AUTHENTICATED &&
+                    incoming.contentTrust == EmergencyContentTrust.REMOTE_UNVERIFIED
+                ) {
                     current
                 } else {
                     incoming
                 }
             }
-            isTrustedLocalContent(current) && isUnverifiedRemoteContent(incoming) -> current
             isTrustedLocalContent(current) && isTrustedLocalContent(incoming) ->
                 current.copy(status = incoming.status)
+            current.contentTrust == EmergencyContentTrust.REMOTE_UNVERIFIED &&
+                incoming.contentTrust == EmergencyContentTrust.REMOTE_AUTHENTICATED -> incoming
             else -> current
         }
         return (existing.filterNot { sameEmergency(it, incoming) } + merged)
@@ -36,6 +40,9 @@ object EmergencyReportMerge {
 
     fun isTrustedLocalContent(report: EmergencyReport): Boolean =
         report.contentTrust == EmergencyContentTrust.LOCAL_ORIGINATED && !isRelayedCopy(report)
+
+    fun isRemoteContent(report: EmergencyReport): Boolean =
+        report.contentTrust != EmergencyContentTrust.LOCAL_ORIGINATED || isRelayedCopy(report)
 
     fun isUnverifiedRemoteContent(report: EmergencyReport): Boolean =
         report.contentTrust == EmergencyContentTrust.REMOTE_UNVERIFIED || isRelayedCopy(report)

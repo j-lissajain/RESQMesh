@@ -147,7 +147,8 @@ fun OfflineMapCanvas(
             currentLatitude = currentLatitude,
             currentLongitude = currentLongitude,
             reports = markerReports,
-            isGestureActive = mapGestureActive
+            isGestureActive = mapGestureActive,
+            loadingLabel = loadingLabel
         )
     }
 }
@@ -163,7 +164,8 @@ private fun drawMap(
     currentLatitude: Double?,
     currentLongitude: Double?,
     reports: List<EmergencyReport>,
-    isGestureActive: Boolean
+    isGestureActive: Boolean,
+    loadingLabel: String
 ) {
     canvas.drawColor(Color.rgb(232, 239, 233))
     if (width <= 0 || height <= 0) return

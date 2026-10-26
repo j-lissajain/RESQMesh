@@ -15,6 +15,7 @@ import com.resqmesh.app.data.EmergencySeenRepository
 import com.resqmesh.app.data.EmergencySeverity
 import com.resqmesh.app.data.EmergencyType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -134,6 +135,127 @@ class EmergencyRelayControllerTest {
 
         assertTrue(transport.sent.isEmpty())
         assertEquals(1, repo.list().size)
+        controller.close()
+    }
+
+    @Test
+    fun authenticatedRemoteEmergencyIsAcceptedPersistedAndForwardedAcrossHops() {
+        val queueB = FakeQueueRepository()
+        val seenB = FakeSeenRepository()
+        val repoB = FakeReportRepository()
+        val transportB = FakeTransport(mutableSetOf("node-a", "node-c"))
+        val schedulerB = TestScheduler()
+        val controllerB = EmergencyRelayController(
+            repository = repoB,
+            seenStore = seenB,
+            queueStore = queueB,
+            transport = transportB,
+            localNodeId = "node-b",
+            nowMillis = { 100L },
+            scheduler = schedulerB
+        )
+        val authenticatedIncoming = receivedReport(
+            revision = 1,
+            hopCount = 0,
+            ttl = 3,
+            description = "Signed emergency from peer A"
+        ).copy(contentTrust = EmergencyContentTrust.REMOTE_AUTHENTICATED)
+
+        controllerB.onIncoming(authenticatedIncoming, "node-a")
+
+        val savedAtB = repoB.list().single()
+        assertEquals(EmergencyContentTrust.REMOTE_AUTHENTICATED, savedAtB.contentTrust)
+        assertEquals("Signed emergency from peer A", savedAtB.description)
+        assertEquals(1, transportB.sent.size)
+        val forwardedToC = transportB.sent.single().report
+        assertEquals("node-c", transportB.sent.single().peerId)
+        assertEquals(1, forwardedToC.hopCount)
+        assertEquals(2, forwardedToC.remainingTtl)
+        assertEquals("node-b", forwardedToC.lastHopId)
+        assertEquals("node-a", forwardedToC.originId)
+        assertEquals(EmergencyContentTrust.REMOTE_AUTHENTICATED, forwardedToC.contentTrust)
+
+        // Duplicate delivery of the same authenticated revision is not forwarded again
+        transportB.acknowledgeLast()
+        schedulerB.runImmediate()
+        controllerB.onIncoming(authenticatedIncoming, "node-a")
+        assertEquals(1, transportB.sent.size)
+
+        controllerB.close()
+    }
+
+    @Test
+    fun remoteAuthenticatedReportCannotOverwriteLocalOriginatedEmergency() {
+        val repo = FakeReportRepository()
+        val localReport = EmergencyReport(
+            id = "mesh-emergency",
+            type = EmergencyType.FIRE,
+            severity = EmergencySeverity.CRITICAL,
+            description = "Local fire report",
+            createdAtMillis = 10L,
+            status = EmergencyReportStatus.TRANSPORT_ACKNOWLEDGED,
+            originId = "node-b",
+            contentRevision = 1,
+            contentTrust = EmergencyContentTrust.LOCAL_ORIGINATED
+        )
+        repo.save(localReport)
+        val transport = FakeTransport(mutableSetOf("node-c"))
+        val controller = EmergencyRelayController(
+            repository = repo,
+            seenStore = FakeSeenRepository(),
+            queueStore = FakeQueueRepository(),
+            transport = transport,
+            localNodeId = "node-b",
+            nowMillis = { 100L },
+            scheduler = TestScheduler()
+        )
+        val spoofedRemote = receivedReport(
+            revision = 5,
+            hopCount = 0,
+            ttl = 3,
+            description = "Remote attempt to overwrite local report"
+        ).copy(contentTrust = EmergencyContentTrust.REMOTE_AUTHENTICATED)
+
+        controller.onIncoming(spoofedRemote, "node-a")
+
+        val current = repo.list().single()
+        assertEquals("Local fire report", current.description)
+        assertEquals(EmergencyContentTrust.LOCAL_ORIGINATED, current.contentTrust)
+        assertEquals(EmergencyReportStatus.TRANSPORT_ACKNOWLEDGED, current.status)
+        assertTrue(transport.sent.isEmpty())
+        controller.close()
+    }
+
+    @Test
+    fun oversizedLocalReportFailsSafelyAndSetsTransmissionFailedStatus() {
+        val repo = FakeReportRepository()
+        val oversized = EmergencyReport(
+            id = "oversized-id",
+            type = EmergencyType.MEDICAL,
+            severity = EmergencySeverity.HIGH,
+            description = "x".repeat(300),
+            createdAtMillis = 10L,
+            status = EmergencyReportStatus.LOCAL_ONLY,
+            originId = "node-a",
+            contentTrust = EmergencyContentTrust.LOCAL_ORIGINATED
+        )
+        repo.save(oversized)
+        val transport = FakeTransport(mutableSetOf("node-b"))
+        val controller = EmergencyRelayController(
+            repository = repo,
+            seenStore = FakeSeenRepository(),
+            queueStore = FakeQueueRepository(),
+            transport = transport,
+            localNodeId = "node-a",
+            nowMillis = { 100L },
+            scheduler = TestScheduler()
+        )
+
+        controller.enqueue(oversized)
+
+        assertTrue(transport.sent.isEmpty())
+        assertEquals(EmergencyReportStatus.TRANSMISSION_FAILED, repo.list().single().status)
+        assertNotNull(controller.state.lastError)
         controller.close()
     }
 

@@ -32,7 +32,7 @@ object EmergencyWireCodec {
     const val LEGACY_SCHEMA_VERSION = 1
     const val PRELIMINARY_SCHEMA_VERSION = 2
     const val REVISION_SCHEMA_VERSION = 3
-    const val MAX_WIRE_BYTES = 1024
+    const val MAX_WIRE_BYTES = 2048
     private const val LEGACY_FIELD_COUNT = 15
     private const val PRELIMINARY_FIELD_COUNT = 17
     private const val REVISION_FIELD_COUNT = 18

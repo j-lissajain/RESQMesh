@@ -114,7 +114,12 @@ class EmergencyRelayController(
 
     fun enqueue(report: EmergencyReport, excludedPeerId: String? = null): Boolean {
         if (closed || !isValid(report) || !canBeQueuedForForwarding(report)) {
-            setError("Emergency could not be queued because its content or envelope is invalid.")
+            if (report.contentTrust == EmergencyContentTrust.LOCAL_ORIGINATED &&
+                report.status != EmergencyReportStatus.RECEIVED_FROM_PEER
+            ) {
+                repository.updateStatus(report.id, EmergencyReportStatus.TRANSMISSION_FAILED)
+            }
+            setError("Emergency could not be queued because its content or envelope is invalid or exceeds wire size limits.")
             return false
         }
         val now = nowMillis()
@@ -167,7 +172,11 @@ class EmergencyRelayController(
         val persisted = repository.save(report)
         val accepted = persisted?.let {
             it.contentRevision == report.contentRevision &&
-                it.contentTrust == EmergencyContentTrust.REMOTE_UNVERIFIED
+                it.contentTrust in setOf(
+                    EmergencyContentTrust.REMOTE_UNVERIFIED,
+                    EmergencyContentTrust.REMOTE_AUTHENTICATED
+                ) &&
+                !com.resqmesh.app.data.EmergencyReportMerge.isTrustedLocalContent(it)
         } == true
         if (!accepted) return
 
@@ -178,7 +187,7 @@ class EmergencyRelayController(
         }
 
         enqueue(
-            report = report.copy(
+            report = persisted.copy(
                 status = EmergencyReportStatus.RECEIVED_FROM_PEER,
                 receivedFromPeerId = actualPeerId,
                 hopCount = nextEnvelope.hopCount,
@@ -325,7 +334,8 @@ class EmergencyRelayController(
 
     private fun isValid(report: EmergencyReport): Boolean {
         if (report.id.isBlank() || !EmergencyReportValidation.isDescriptionValid(report.description)) return false
-        return EmergencyEnvelopeRules.validate(report.hopCount, report.remainingTtl, report.lastHopId) == null
+        if (EmergencyEnvelopeRules.validate(report.hopCount, report.remainingTtl, report.lastHopId) != null) return false
+        return runCatching { com.resqmesh.app.data.EmergencyWireCodec.encode(report, report.originId) }.isSuccess
     }
 
     private fun canBeQueuedForForwarding(report: EmergencyReport): Boolean =

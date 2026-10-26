@@ -28,7 +28,8 @@ data class BleFrame(
 )
 
 object BleMessageProtocol {
-    const val MAX_MESSAGE_BYTES = 1024
+    const val MAX_CHAT_MESSAGE_BYTES = 1024
+    const val MAX_MESSAGE_BYTES = 4096
     const val DEFAULT_MTU = 23
     private const val HEADER_SIZE = 16
     private const val MAGIC_0 = 0x52
@@ -147,15 +148,27 @@ class BleFrameReassembler {
 
     fun accept(frame: BleFrame, nowMillis: Long = System.currentTimeMillis()): ByteArray? {
         removeExpired(nowMillis)
+        if (frame.totalLength < 0 || frame.totalLength > BleMessageProtocol.MAX_MESSAGE_BYTES || frame.offset < 0) {
+            return null
+        }
         val key = Key(frame.type, frame.messageId)
         if (completedKeys.contains(key)) return null
         if (frame.totalLength == 0) {
+            if (frame.offset != 0 || frame.payload.isNotEmpty()) return null
             completedKeys.add(key)
             trimCompletedKeys()
             return ByteArray(0)
         }
+        if (frame.payload.isEmpty() || frame.offset + frame.payload.size > frame.totalLength) {
+            partialFrames.remove(key)
+            return null
+        }
 
         val partial = partialFrames.getOrPut(key) {
+            while (partialFrames.size >= MAX_PARTIAL_FRAMES) {
+                val oldestKey = partialFrames.keys.firstOrNull() ?: break
+                partialFrames.remove(oldestKey)
+            }
             PartialFrame(frame.totalLength, nowMillis)
         }
         if (partial.totalLength != frame.totalLength) {
@@ -186,7 +199,7 @@ class BleFrameReassembler {
         }
     }
 
-    fun removeExpired(nowMillis: Long, timeoutMillis: Long = 15_000L) {
+    fun removeExpired(nowMillis: Long, timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS) {
         val iterator = partialFrames.entries.iterator()
         while (iterator.hasNext()) {
             val entry = iterator.next()
@@ -202,11 +215,17 @@ class BleFrameReassembler {
     }
 
     private fun trimCompletedKeys() {
-        while (completedKeys.size > 128) {
+        while (completedKeys.size > MAX_COMPLETED_KEYS) {
             completedKeys.iterator().let { iterator ->
                 iterator.next()
                 iterator.remove()
             }
         }
+    }
+
+    companion object {
+        const val DEFAULT_TIMEOUT_MILLIS = 15_000L
+        const val MAX_PARTIAL_FRAMES = 32
+        const val MAX_COMPLETED_KEYS = 128
     }
 }

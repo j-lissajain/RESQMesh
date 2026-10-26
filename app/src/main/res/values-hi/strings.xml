@@ -33,4 +33,5 @@
     <string name="location_status_permission">अनुमति आवश्यक</string><string name="location_status_acquiring">प्राप्त हो रहा है</string><string name="location_status_fresh">नया</string><string name="location_status_stale">पुराना/कैश</string><string name="location_status_low_accuracy">कम सटीकता</string><string name="location_status_unavailable">अनुपलब्ध</string>
     <string name="map_data_loading_label">स्थानीय OpenStreetMap डेटा लोड हो रहा है…</string>
     <string name="map_dataset_description">%1$d स्थानीय OSM एक्सट्रैक्ट · %2$s</string><string name="map_dataset_missing">नागपुर ऑफ़लाइन मानचित्र डेटा ऐप बंडल में नहीं है।</string>
+    <string name="content_origin_authenticated">सामग्री स्रोत: डिवाइस कुंजी द्वारा हस्ताक्षरित (आपातकालीन दावे का स्वतंत्र सत्यापन नहीं)</string><string name="received_from_peer_authenticated">पास के पीयर से प्राप्त (डिवाइस हस्ताक्षर सत्यापित; दावा अप्रमाणित)</string>
 </resources>
