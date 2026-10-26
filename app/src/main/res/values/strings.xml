@@ -1,3 +1,14 @@
 <resources>
     <string name="app_name">RESQMesh</string>
+    <string name="instant_sos">INSTANT SOS</string>
+    <string name="instant_sos_description">Save and queue an emergency on this device</string>
+    <string name="coordination_title">Volunteer and resource coordination</string>
+    <string name="language">Language</string>
+    <string name="english">English</string>
+    <string name="hindi">हिंदी</string>
+    <string name="marathi">मराठी</string>
+    <string name="saved_locally">Saved locally</string>
+    <string name="waiting_for_peer">Waiting for a nearby device</string>
+    <string name="transport_acknowledged">Delivered to peer transport; not rescue acceptance</string>
+    <string name="unverified_content">Received content is unverified</string>
 </resources>

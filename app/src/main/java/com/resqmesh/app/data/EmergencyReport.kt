@@ -9,6 +9,11 @@ enum class EmergencyType(val label: String) {
     TRAPPED_PERSON("Trapped person"),
     FOOD_WATER("Food/water assistance"),
     SHELTER("Shelter"),
+    PERSONAL_SAFETY("Personal safety threat"),
+    HARASSMENT("Harassment"),
+    UNSAFE_TRAVEL("Unsafe travel situation"),
+    CHILD_SAFETY("Child safety concern"),
+    MISSING_PERSON("Missing person concern"),
     OTHER("Other");
 
     companion object {
@@ -31,12 +36,36 @@ enum class EmergencySeverity(val label: String) {
 
 enum class EmergencyReportStatus(val label: String) {
     LOCAL_ONLY("Saved locally — not transmitted"),
+    QUEUED_FOR_FORWARDING("Queued for nearby forwarding"),
+    TRANSMISSION_IN_PROGRESS("Transmission in progress"),
+    WAITING_FOR_PEER("Waiting for a nearby peer"),
     TRANSPORT_ACKNOWLEDGED("Transport acknowledged — not accepted"),
     TRANSMISSION_FAILED("Transmission failed — retry available"),
     RECEIVED_FROM_PEER("Received from another device — local copy");
 
     companion object {
         fun fromStoredValue(value: String?): EmergencyReportStatus? =
+            entries.firstOrNull { it.name == value }
+    }
+}
+
+enum class EmergencyContentTrust {
+    LOCAL_ORIGINATED,
+    REMOTE_UNVERIFIED;
+
+    companion object {
+        fun fromStoredValue(value: String?): EmergencyContentTrust? =
+            entries.firstOrNull { it.name == value }
+    }
+}
+
+enum class EmergencyLifecycleStatus(val label: String) {
+    ACTIVE("Active"),
+    CANCELLED("Cancelled"),
+    RESOLVED("Resolved");
+
+    companion object {
+        fun fromStoredValue(value: String?): EmergencyLifecycleStatus? =
             entries.firstOrNull { it.name == value }
     }
 }
@@ -71,5 +100,12 @@ data class EmergencyReport(
     val location: EmergencyLocation? = null,
     val locationDescription: String? = null,
     val originId: String? = null,
-    val receivedFromPeerId: String? = null
+    val receivedFromPeerId: String? = null,
+    val hopCount: Int = 0,
+    val remainingTtl: Int = EmergencyEnvelopeRules.MAX_HOP_LIMIT,
+    val lastHopId: String? = null,
+    val contentRevision: Int = EmergencyRevisionRules.INITIAL_REVISION,
+    val contentTrust: EmergencyContentTrust = EmergencyContentTrust.LOCAL_ORIGINATED,
+    val lifecycleStatus: EmergencyLifecycleStatus = EmergencyLifecycleStatus.ACTIVE,
+    val updatedAtMillis: Long = createdAtMillis
 )

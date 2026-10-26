@@ -4,24 +4,30 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONException
 
-class LocalEmergencyRepository(context: Context) {
-    private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+class LocalEmergencyRepository(context: Context) : EmergencyReportRepository {
+    private val preferences = context.applicationContext
+        .getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+    private val lock = Any()
 
-    fun list(): List<EmergencyReport> = loadStoredReports()
+    override fun list(): List<EmergencyReport> = synchronized(lock) { loadStoredReports() }
 
-    fun save(report: EmergencyReport) {
+    override fun save(report: EmergencyReport): EmergencyReport? = synchronized(lock) {
+        if (!EmergencyRevisionRules.isValid(report.contentRevision)) return@synchronized null
         val reports = EmergencyReportMerge.upsert(loadStoredReports(), report)
         val encoded = JSONArray().apply {
             reports.forEach { put(EmergencyReportJsonCodec.encode(it)) }
+        }.toString()
+        if (preferences.getString(KEY_REPORTS, null) != encoded) {
+            preferences.edit().putString(KEY_REPORTS, encoded).commit()
         }
-        preferences.edit().putString(KEY_REPORTS, encoded.toString()).apply()
+        loadStoredReports().firstOrNull { it.id == report.id }
     }
 
-    fun updateStatus(reportId: String, status: EmergencyReportStatus): EmergencyReport? {
+    override fun updateStatus(reportId: String, status: EmergencyReportStatus): EmergencyReport? = synchronized(lock) {
         val report = loadStoredReports().firstOrNull { it.id == reportId } ?: return null
         val updated = report.copy(status = status)
         save(updated)
-        return updated
+        loadStoredReports().firstOrNull { it.id == reportId }
     }
 
     private fun loadStoredReports(): List<EmergencyReport> {
@@ -32,7 +38,9 @@ class LocalEmergencyRepository(context: Context) {
                 for (index in 0 until array.length()) {
                     EmergencyReportJsonCodec.decode(array.optJSONObject(index))?.let(::add)
                 }
-            }.sortedByDescending(EmergencyReport::createdAtMillis)
+            }.fold(emptyList()) { current, report ->
+                EmergencyReportMerge.upsert(current, report)
+            }
         } catch (_: JSONException) {
             emptyList()
         }

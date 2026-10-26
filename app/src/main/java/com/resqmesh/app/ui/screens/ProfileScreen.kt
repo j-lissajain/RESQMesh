@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.resqmesh.app.data.LocalProfile
 import com.resqmesh.app.data.ThemePreference
+import com.resqmesh.app.data.LanguagePreference
 
 @Composable
 fun ProfileScreen(
@@ -25,7 +26,9 @@ fun ProfileScreen(
     themePreference: ThemePreference,
     contentPadding: PaddingValues,
     onEditProfile: () -> Unit,
-    onThemeChange: (ThemePreference) -> Unit
+    onThemeChange: (ThemePreference) -> Unit,
+    languagePreference: LanguagePreference,
+    onLanguageChange: (LanguagePreference) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -51,6 +54,18 @@ fun ProfileScreen(
                     selected = themePreference == option,
                     onClick = { onThemeChange(option) },
                     label = { Text(option.label) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        Text("Language", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text("Emergency wording can be shown in English, Hindi, or Marathi. User-entered descriptions are not translated.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            LanguagePreference.entries.forEach { option ->
+                FilterChip(
+                    selected = languagePreference == option,
+                    onClick = { onLanguageChange(option) },
+                    label = { Text(option.displayLabel) },
                     modifier = Modifier.weight(1f)
                 )
             }

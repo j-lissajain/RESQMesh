@@ -42,11 +42,13 @@ import com.resqmesh.app.ui.theme.EmergencySurface
 @Composable
 fun BleDiscoverySection(
     modifier: Modifier = Modifier,
-    messagingManager: BleMessagingManager
+    messagingManager: BleMessagingManager,
+    discoveryManager: BleDiscoveryManager? = null
 ) {
     val context = LocalContext.current
     val checker = remember { BluetoothReadinessChecker(context.applicationContext) }
-    val manager = remember { BleDiscoveryManager(context.applicationContext) }
+    val manager = discoveryManager ?: remember { BleDiscoveryManager(context.applicationContext) }
+    val ownsManager = discoveryManager == null
     var state by remember { mutableStateOf(manager.state) }
     var messagingState by remember { mutableStateOf(messagingManager.state) }
     var messageText by remember { mutableStateOf("") }
@@ -57,7 +59,7 @@ fun BleDiscoverySection(
         }
         onDispose {
             removeListener()
-            manager.close()
+            if (ownsManager) manager.close()
         }
     }
 
@@ -188,7 +190,7 @@ fun BleDiscoverySection(
                             lastSeen = formatLastSeenTime(peer.lastSeenAtMillis),
                             rssi = peer.rssi,
                             selected = messagingState.selectedPeerId == peer.anonymousId,
-                            connected = messagingState.connectedPeerId == peer.anonymousId,
+                            connected = peer.anonymousId in messagingState.connectedPeerIds,
                             onSelect = {
                                 messagingManager.selectPeer(peer.anonymousId)
                             },

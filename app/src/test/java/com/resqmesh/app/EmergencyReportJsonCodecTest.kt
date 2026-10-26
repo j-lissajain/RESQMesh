@@ -11,6 +11,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Test
+import org.json.JSONObject
 
 class EmergencyReportJsonCodecTest {
     @Test
@@ -32,7 +33,10 @@ class EmergencyReportJsonCodecTest {
                 isVerified = false
             ),
             originId = "origin-a",
-            receivedFromPeerId = "peer-b"
+            receivedFromPeerId = "peer-b",
+            hopCount = 1,
+            remainingTtl = 2,
+            lastHopId = "peer-b"
         )
 
         val restored = EmergencyReportStorageCodec.decode(
@@ -46,5 +50,26 @@ class EmergencyReportJsonCodecTest {
         assertEquals("origin-a", restored?.originId)
         assertEquals("peer-b", restored?.receivedFromPeerId)
         assertEquals("Saved locally — not transmitted", restored?.status?.label)
+        assertEquals(1, restored?.hopCount)
+        assertEquals(2, restored?.remainingTtl)
+        assertEquals("peer-b", restored?.lastHopId)
+    }
+
+    @Test
+    fun legacyStoredReportDefaultsToRevisionOneAndUnverifiedPeerContent() {
+        val legacy = JSONObject().apply {
+            put("id", "legacy-report")
+            put("type", EmergencyType.MEDICAL.name)
+            put("severity", EmergencySeverity.HIGH.name)
+            put("description", "Legacy report")
+            put("created_at", 100L)
+            put("status", EmergencyReportStatus.RECEIVED_FROM_PEER.name)
+            put("received_from_peer_id", "peer-a")
+        }
+
+        val restored = com.resqmesh.app.data.EmergencyReportJsonCodec.decode(legacy)
+
+        assertEquals(1, restored?.contentRevision)
+        assertEquals(com.resqmesh.app.data.EmergencyContentTrust.REMOTE_UNVERIFIED, restored?.contentTrust)
     }
 }

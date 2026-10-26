@@ -23,8 +23,28 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.resqmesh.app.bluetooth.BleMessagingManager
-import com.resqmesh.app.data.EmergencyLocation
+import com.resqmesh.app.bluetooth.BleDiscoveryManager
+import com.resqmesh.app.bluetooth.EmergencyRelayController
+import com.resqmesh.app.bluetooth.MeshRelayController
+import com.resqmesh.app.data.EmergencySeenStore
+import com.resqmesh.app.data.EmergencyRelayQueueStore
 import com.resqmesh.app.data.LocalEmergencyRepository
+import com.resqmesh.app.data.LocalNodeIdentityStore
+import com.resqmesh.app.data.AssistanceResponseStore
+import com.resqmesh.app.data.LanguagePreference
+import com.resqmesh.app.data.LanguagePreferenceStore
+import com.resqmesh.app.data.ResourceStore
+import com.resqmesh.app.data.SafetyPreferencesStore
+import com.resqmesh.app.data.VolunteerProfileStore
+import com.resqmesh.app.data.EmergencyReport
+import com.resqmesh.app.data.EmergencySeverity
+import com.resqmesh.app.data.EmergencyType
+import com.resqmesh.app.data.EmergencyLocation
+import com.resqmesh.app.data.EmergencyLocationSource
+import com.resqmesh.app.data.EmergencyLifecycleStatus
+import com.resqmesh.app.data.withLifecycleStatus
+import com.resqmesh.app.data.EmergencyReportValidation
+import com.resqmesh.app.data.bumpContentRevision
 import com.resqmesh.app.data.LocalProfile
 import com.resqmesh.app.data.LocalProfileStore
 import com.resqmesh.app.data.ThemePreference
@@ -39,6 +59,7 @@ import com.resqmesh.app.ui.screens.NetworkScreen
 import com.resqmesh.app.ui.screens.ProfileScreen
 import com.resqmesh.app.ui.screens.ProfileSetupScreen
 import com.resqmesh.app.ui.screens.WelcomeScreen
+import com.resqmesh.app.ui.screens.CoordinationScreen
 import com.resqmesh.app.ui.components.EmergencyReportingSection
 import com.resqmesh.app.ui.components.OfflineLocationPickerScreen
 import com.resqmesh.app.ui.theme.RESQMeshTheme
@@ -54,6 +75,7 @@ private object Routes {
     const val NETWORK = "network"
     const val PROFILE = "profile"
     const val LOCATION_PICKER = "location_picker"
+    const val COORDINATION = "coordination"
 }
 
 private data class MainDestination(
@@ -76,14 +98,48 @@ fun ResqMeshApp() {
     val profileStore = remember { LocalProfileStore(context.applicationContext) }
     val themeStore = remember { ThemePreferenceStore(context.applicationContext) }
     val emergencyRepository = remember { LocalEmergencyRepository(context.applicationContext) }
+    val emergencySeenStore = remember { EmergencySeenStore(context.applicationContext) }
+    val relayQueueStore = remember { EmergencyRelayQueueStore(context.applicationContext) }
+    val localNodeId = remember { LocalNodeIdentityStore(context.applicationContext).getOrCreate() }
     val mapRepository = remember { OfflineMapRepository(context.applicationContext) }
     val messagingManager = remember { BleMessagingManager(context.applicationContext) }
+    val discoveryManager = remember { BleDiscoveryManager(context.applicationContext) }
+    val relayController = remember {
+        EmergencyRelayController(
+            repository = emergencyRepository,
+            seenStore = emergencySeenStore,
+            queueStore = relayQueueStore,
+            transport = messagingManager,
+            localNodeId = localNodeId
+        )
+    }
+    val volunteerStore = remember { VolunteerProfileStore(context.applicationContext) }
+    val resourceStore = remember { ResourceStore(context.applicationContext) }
+    val responseStore = remember { AssistanceResponseStore(context.applicationContext) }
+    val safetyStore = remember { SafetyPreferencesStore(context.applicationContext) }
+    val meshQueueStore = remember { com.resqmesh.app.bluetooth.MeshRecordQueueStore(context.applicationContext) }
+    val meshSeenStore = remember { com.resqmesh.app.bluetooth.MeshSeenStore(context.applicationContext) }
+    val meshRelay = remember {
+        MeshRelayController(
+            queue = meshQueueStore,
+            seen = meshSeenStore,
+            transport = messagingManager,
+            localNodeId = localNodeId,
+            volunteerStore = volunteerStore,
+            resourceStore = resourceStore,
+            responseStore = responseStore,
+            emergencyRepository = emergencyRepository
+        )
+    }
+    val languageStore = remember { LanguagePreferenceStore(context.applicationContext) }
     val locationEngine = remember { OfflineLocationEngine(context.applicationContext) }
     val navController = rememberNavController()
     val savedProfile = remember { profileStore.load() }
     var profile by remember { mutableStateOf(savedProfile) }
     var themePreference by remember { mutableStateOf(themeStore.load()) }
+    var languagePreference by remember { mutableStateOf(languageStore.load()) }
     var reports by remember { mutableStateOf(emergencyRepository.list()) }
+    var relayState by remember { mutableStateOf(relayController.state) }
     var mapDataset by remember { mutableStateOf<OfflineMapDataset?>(null) }
     var locationState by remember { mutableStateOf<LocationEngineState>(locationEngine.state) }
     var selectedMapLocation by remember { mutableStateOf<EmergencyLocation?>(null) }
@@ -93,13 +149,37 @@ fun ResqMeshApp() {
             mapDataset = withContext(Dispatchers.Default) { mapRepository.loadDataset() }
         }
     }
-    DisposableEffect(messagingManager) { onDispose { messagingManager.close() } }
-    DisposableEffect(messagingManager, emergencyRepository) {
-        messagingManager.setEmergencyReceiver { report, _ ->
-            emergencyRepository.save(report)
+    DisposableEffect(relayController) {
+        val remove = relayController.addListener { relayState = it }
+        onDispose { remove() }
+    }
+    DisposableEffect(discoveryManager) {
+        onDispose {
+            discoveryManager.close()
+        }
+    }
+    DisposableEffect(messagingManager, relayController) {
+        messagingManager.setEmergencyReceiver { report, peerId ->
+            relayController.onIncoming(report, peerId)
             reports = emergencyRepository.list()
         }
         onDispose { messagingManager.setEmergencyReceiver(null) }
+    }
+    DisposableEffect(meshRelay) {
+        meshRelay.setReceiver()
+        onDispose {
+            meshRelay.close()
+            messagingManager.setMeshRecordReceiver(null)
+        }
+    }
+    DisposableEffect(messagingManager, relayController) {
+        onDispose {
+            relayController.close()
+            messagingManager.close()
+        }
+    }
+    LaunchedEffect(relayState) {
+        reports = emergencyRepository.list()
     }
     DisposableEffect(locationEngine) {
         val remove = locationEngine.addListener { locationState = it }
@@ -178,7 +258,40 @@ fun ResqMeshApp() {
                             messagingManager = messagingManager,
                             contentPadding = innerPadding,
                             onOpenMap = { navController.navigate(Routes.MAP) },
-                            onReportEmergency = { navController.navigate(Routes.SOS) }
+                            onReportEmergency = { navController.navigate(Routes.SOS) },
+                            onInstantSos = {
+                                val reading = locationEngine.state.reading
+                                val report = EmergencyReport(
+                                    type = EmergencyType.OTHER,
+                                    severity = EmergencySeverity.HIGH,
+                                    description = "Emergency assistance requested",
+                                    createdAtMillis = System.currentTimeMillis(),
+                                    originId = localNodeId,
+                                    location = reading?.let {
+                                        EmergencyLocation(
+                                            latitude = it.latitude,
+                                            longitude = it.longitude,
+                                            accuracyMeters = it.accuracyMeters,
+                                            timestampMillis = it.timestampMillis,
+                                            source = EmergencyLocationSource.GNSS
+                                        )
+                                    }
+                                )
+                                emergencyRepository.save(report)
+                                relayController.enqueue(report)
+                                reports = emergencyRepository.list()
+                                report.id
+                            },
+                            onCancelInstantSos = { id ->
+                                emergencyRepository.list().firstOrNull { it.id == id }?.let { report ->
+                                    val cancelled = report.withLifecycleStatus(com.resqmesh.app.data.EmergencyLifecycleStatus.CANCELLED)
+                                    emergencyRepository.save(cancelled)
+                                    meshRelay.enqueueEmergencyLifecycleUpdate(cancelled)
+                                    reports = emergencyRepository.list()
+                                }
+                            },
+                            onOpenCoordination = { navController.navigate(Routes.COORDINATION) },
+                            languagePreference = languagePreference
                         )
                     }
                 }
@@ -196,18 +309,40 @@ fun ResqMeshApp() {
                         repository = emergencyRepository,
                         locationEngine = locationEngine,
                         messagingManager = messagingManager,
+                        relayController = relayController,
+                        localNodeId = localNodeId,
                         reportsSnapshot = reports,
                         mapLocation = selectedMapLocation,
                         onChooseOnMap = { navController.navigate(Routes.LOCATION_PICKER) },
                         onClearMapSelection = { selectedMapLocation = null },
                         onReportsChanged = { reports = it },
+                        onLifecycleChange = { report, status ->
+                            val updated = report.withLifecycleStatus(status)
+                            emergencyRepository.save(updated)
+                            meshRelay.enqueueEmergencyLifecycleUpdate(updated)
+                            reports = emergencyRepository.list()
+                        },
+                        onContentUpdate = { report, description ->
+                            if (EmergencyReportValidation.isDescriptionValid(description)) {
+                                val updated = report.copy(description = description).bumpContentRevision()
+                                emergencyRepository.save(updated)
+                                meshRelay.enqueueEmergencyLifecycleUpdate(updated)
+                                reports = emergencyRepository.list()
+                            }
+                        },
+                        assistanceResponses = responseStore.list(),
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(innerPadding)
                     )
                 }
                 composable(Routes.NETWORK) {
-                    NetworkScreen(messagingManager = messagingManager, contentPadding = innerPadding)
+                    NetworkScreen(
+                        messagingManager = messagingManager,
+                        discoveryManager = discoveryManager,
+                        relayController = relayController,
+                        contentPadding = innerPadding
+                    )
                 }
                 composable(Routes.PROFILE) {
                     profile?.let { currentProfile ->
@@ -219,9 +354,40 @@ fun ResqMeshApp() {
                             onThemeChange = {
                                 themeStore.save(it)
                                 themePreference = it
+                            },
+                            languagePreference = languagePreference,
+                            onLanguageChange = {
+                                languageStore.save(it)
+                                languagePreference = it
                             }
                         )
                     }
+                }
+                composable(Routes.COORDINATION) {
+                    CoordinationScreen(
+                        contentPadding = innerPadding,
+                        emergencies = reports,
+                        volunteerStore = volunteerStore,
+                        resourceStore = resourceStore,
+                        responseStore = responseStore,
+                        safetyStore = safetyStore,
+                        meshRelay = meshRelay,
+                        localNodeId = localNodeId,
+                        localAlias = profile?.displayName ?: "Local volunteer",
+                        onSafetySos = {
+                            val report = EmergencyReport(
+                                type = EmergencyType.PERSONAL_SAFETY,
+                                severity = EmergencySeverity.CRITICAL,
+                                description = "Personal safety assistance requested",
+                                createdAtMillis = System.currentTimeMillis(),
+                                originId = localNodeId
+                            )
+                            emergencyRepository.save(report)
+                            relayController.enqueue(report)
+                            reports = emergencyRepository.list()
+                        },
+                        languagePreference = languagePreference
+                    )
                 }
                 composable(Routes.LOCATION_PICKER) {
                     OfflineLocationPickerScreen(

@@ -17,18 +17,25 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.resqmesh.app.bluetooth.BleMessagingManager
 import com.resqmesh.app.data.EmergencyReport
 import com.resqmesh.app.data.LocalProfile
+import com.resqmesh.app.data.LanguagePreference
+import com.resqmesh.app.ui.languageCopy
+import kotlinx.coroutines.delay
 
 @Composable
 fun HomeScreen(
@@ -37,12 +44,24 @@ fun HomeScreen(
     messagingManager: BleMessagingManager,
     contentPadding: PaddingValues,
     onOpenMap: () -> Unit,
-    onReportEmergency: () -> Unit
+    onReportEmergency: () -> Unit,
+    onInstantSos: () -> String?,
+    onCancelInstantSos: (String) -> Unit,
+    onOpenCoordination: () -> Unit,
+    languagePreference: LanguagePreference = LanguagePreference.ENGLISH
 ) {
+    val copy = languageCopy(languagePreference)
     var messagingState by remember { mutableStateOf(messagingManager.state) }
+    var undoId by remember { mutableStateOf<String?>(null) }
     DisposableEffect(messagingManager) {
         val remove = messagingManager.addListener { messagingState = it }
         onDispose(remove)
+    }
+    LaunchedEffect(undoId) {
+        if (undoId != null) {
+            delay(5_000L)
+            undoId = null
+        }
     }
 
     Column(
@@ -54,8 +73,26 @@ fun HomeScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("RESQMesh", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
-        Text("Offline emergency coordination", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+        Text(copy.appTagline, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
         Text("Welcome, ${profile.displayName}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+
+        Button(
+            onClick = { undoId = onInstantSos() },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .semantics { contentDescription = "Instant SOS. Save and queue emergency locally." }
+        ) {
+            Text(copy.instantSos, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+        }
+        undoId?.let { id ->
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                Row(modifier = Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("SOS saved and queued. Undo within 5 seconds.", modifier = Modifier.weight(1f))
+                    TextButton(onClick = { onCancelInstantSos(id); undoId = null }) { Text("Undo") }
+                }
+            }
+        }
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             StatusCard(
@@ -65,7 +102,7 @@ fun HomeScreen(
             )
             StatusCard(
                 title = "Nearby peers",
-                value = if (messagingState.connectedPeerId == null) "0" else "1",
+                value = messagingState.connectedPeerIds.size.toString(),
                 modifier = Modifier.weight(1f)
             )
             StatusCard(
@@ -87,6 +124,10 @@ fun HomeScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     Button(onClick = onReportEmergency, modifier = Modifier.weight(1f)) { Text("Report emergency") }
                     OutlinedButton(onClick = onOpenMap, modifier = Modifier.weight(1f)) { Text("Open map") }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(onClick = onOpenCoordination, modifier = Modifier.fillMaxWidth()) {
+                    Text("${copy.volunteer}, ${copy.resources}, ${copy.safety}")
                 }
             }
         }

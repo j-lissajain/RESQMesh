@@ -24,6 +24,24 @@ object EmergencyReportJsonCodec {
                     receivedFromPeerId = json.optString(KEY_RECEIVED_FROM_PEER_ID)
                         .trim()
                         .takeIf { it.isNotBlank() },
+                    hopCount = json.optInt(KEY_HOP_COUNT, 0),
+                     remainingTtl = if (json.has(KEY_REMAINING_TTL)) {
+                         json.optInt(KEY_REMAINING_TTL)
+                     } else {
+                         EmergencyEnvelopeRules.MAX_HOP_LIMIT
+                     },
+                     lastHopId = json.optString(KEY_LAST_HOP_ID).trim().takeIf { it.isNotBlank() },
+                     contentRevision = json.optInt(
+                         KEY_CONTENT_REVISION,
+                         EmergencyRevisionRules.INITIAL_REVISION
+                     ),
+                     contentTrustName = json.optString(KEY_CONTENT_TRUST)
+                         .trim()
+                         .takeIf { it.isNotBlank() },
+                     lifecycleStatusName = json.optString(KEY_LIFECYCLE_STATUS)
+                         .trim()
+                         .takeIf { it.isNotBlank() },
+                     updatedAtMillis = json.optLong(KEY_UPDATED_AT, json.optLong(KEY_CREATED_AT, Long.MIN_VALUE)),
                     location = json.optJSONObject(KEY_LOCATION)?.let { location ->
                         StoredEmergencyLocation(
                             latitude = location.optDouble(KEY_LATITUDE, Double.NaN),
@@ -53,6 +71,13 @@ object EmergencyReportJsonCodec {
         locationDescription?.let { put(KEY_LOCATION_DESCRIPTION, it) }
         originId?.let { put(KEY_ORIGIN_ID, it) }
         receivedFromPeerId?.let { put(KEY_RECEIVED_FROM_PEER_ID, it) }
+        put(KEY_HOP_COUNT, hopCount)
+        put(KEY_REMAINING_TTL, remainingTtl)
+        lastHopId?.let { put(KEY_LAST_HOP_ID, it) }
+        put(KEY_CONTENT_REVISION, contentRevision)
+        contentTrustName?.let { put(KEY_CONTENT_TRUST, it) }
+        lifecycleStatusName?.let { put(KEY_LIFECYCLE_STATUS, it) }
+        put(KEY_UPDATED_AT, updatedAtMillis)
         location?.let { value ->
             put(KEY_LOCATION, JSONObject().apply {
                 put(KEY_LATITUDE, value.latitude)
@@ -74,6 +99,13 @@ object EmergencyReportJsonCodec {
     private const val KEY_LOCATION_DESCRIPTION = "location_description"
     private const val KEY_ORIGIN_ID = "origin_id"
     private const val KEY_RECEIVED_FROM_PEER_ID = "received_from_peer_id"
+    private const val KEY_HOP_COUNT = "hop_count"
+    private const val KEY_REMAINING_TTL = "remaining_ttl"
+    private const val KEY_LAST_HOP_ID = "last_hop_id"
+    private const val KEY_CONTENT_REVISION = "content_revision"
+    private const val KEY_CONTENT_TRUST = "content_trust"
+    private const val KEY_LIFECYCLE_STATUS = "lifecycle_status"
+    private const val KEY_UPDATED_AT = "updated_at"
     private const val KEY_LOCATION = "location"
     private const val KEY_LATITUDE = "latitude"
     private const val KEY_LONGITUDE = "longitude"

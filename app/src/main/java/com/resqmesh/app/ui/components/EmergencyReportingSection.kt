@@ -47,10 +47,14 @@ import com.resqmesh.app.data.EmergencyReport
 import com.resqmesh.app.data.EmergencyReportStatus
 import com.resqmesh.app.data.EmergencySeverity
 import com.resqmesh.app.data.EmergencyType
+import com.resqmesh.app.data.EmergencyLifecycleStatus
+import com.resqmesh.app.data.AssistanceResponse
+import com.resqmesh.app.data.withLifecycleStatus
 import com.resqmesh.app.data.EmergencyReportValidation
 import com.resqmesh.app.data.LocalEmergencyRepository
 import com.resqmesh.app.bluetooth.BleMessagingManager
 import com.resqmesh.app.bluetooth.BleConnectionStatus
+import com.resqmesh.app.bluetooth.EmergencyRelayController
 import com.resqmesh.app.bluetooth.EmergencyTransmissionState
 import com.resqmesh.app.location.DeviceLocationReading
 import com.resqmesh.app.location.LocationEngineState
@@ -69,11 +73,16 @@ fun EmergencyReportingSection(
     repository: LocalEmergencyRepository,
     locationEngine: OfflineLocationEngine,
     messagingManager: BleMessagingManager,
+    relayController: EmergencyRelayController? = null,
+    localNodeId: String? = null,
     reportsSnapshot: List<EmergencyReport> = repository.list(),
     mapLocation: EmergencyLocation? = null,
     onChooseOnMap: () -> Unit = {},
     onClearMapSelection: () -> Unit = {},
     onReportsChanged: (List<EmergencyReport>) -> Unit = {},
+    onLifecycleChange: (EmergencyReport, EmergencyLifecycleStatus) -> Unit = { _, _ -> },
+    onContentUpdate: (EmergencyReport, String) -> Unit = { _, _ -> },
+    assistanceResponses: List<AssistanceResponse> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -83,6 +92,7 @@ fun EmergencyReportingSection(
     var selectedReport by remember { mutableStateOf<EmergencyReport?>(null) }
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var messagingState by remember { mutableStateOf(messagingManager.state) }
+    var relayState by remember { mutableStateOf(relayController?.state) }
 
     DisposableEffect(locationEngine) {
         val removeListener = locationEngine.addListener { updatedState -> locationState = updatedState }
@@ -94,18 +104,33 @@ fun EmergencyReportingSection(
         onDispose(removeListener)
     }
 
+    DisposableEffect(relayController) {
+        if (relayController == null) return@DisposableEffect onDispose { }
+        val removeListener = relayController.addListener { relayState = it }
+        onDispose(removeListener)
+    }
+
     LaunchedEffect(messagingState.emergencyTransmissions) {
-        messagingState.emergencyTransmissions.forEach { (emergencyId, transmissionState) ->
-            val status = when (transmissionState) {
-                EmergencyTransmissionState.TRANSPORT_ACKNOWLEDGED -> EmergencyReportStatus.TRANSPORT_ACKNOWLEDGED
-                EmergencyTransmissionState.FAILED,
-                EmergencyTransmissionState.DISCONNECTED -> EmergencyReportStatus.TRANSMISSION_FAILED
-                else -> null
+        if (relayController == null) {
+            messagingState.emergencyTransmissions.forEach { (emergencyId, transmissionState) ->
+                val status = when (transmissionState) {
+                    EmergencyTransmissionState.TRANSPORT_ACKNOWLEDGED -> EmergencyReportStatus.TRANSPORT_ACKNOWLEDGED
+                    EmergencyTransmissionState.FAILED,
+                    EmergencyTransmissionState.DISCONNECTED -> EmergencyReportStatus.TRANSMISSION_FAILED
+                    else -> null
+                }
+                if (status != null) repository.updateStatus(emergencyId, status)
             }
-            if (status != null) repository.updateStatus(emergencyId, status)
         }
         reports = repository.list()
         onReportsChanged(reports)
+    }
+
+    LaunchedEffect(relayState) {
+        if (relayController != null) {
+            reports = repository.list()
+            onReportsChanged(reports)
+        }
     }
 
     LaunchedEffect(locationState.reading?.timestampMillis, locationState.isRefreshing) {
@@ -146,7 +171,7 @@ fun EmergencyReportingSection(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Saved on this device only. Reports are not transmitted or broadcast in this batch.",
+                text = "Saved on this device. Connect to a nearby peer to send a report over BLE. A transport acknowledgement is not responder acceptance.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall
             )
@@ -194,12 +219,16 @@ fun EmergencyReportingSection(
                         ReportSummaryCard(
                             report = report,
                             transmissionState = messagingState.emergencyTransmissions[report.id],
-                            canSend = messagingState.connectedPeerId != null &&
-                                messagingState.connectionStatus == BleConnectionStatus.CONNECTED,
+                            canSend = if (relayController != null) {
+                                true
+                            } else {
+                                messagingState.connectedPeerId != null &&
+                                    messagingState.connectionStatus == BleConnectionStatus.CONNECTED
+                            },
                             onClick = { selectedReport = report },
                             onSend = {
-                                val sent = messagingManager.sendEmergency(report)
-                                if (!sent && messagingState.connectedPeerId == null) {
+                                val sent = relayController?.enqueue(report) ?: messagingManager.sendEmergency(report)
+                                if (!sent && messagingState.connectedPeerId == null && relayController == null) {
                                     selectedReport = report
                                 }
                             }
@@ -217,7 +246,7 @@ fun EmergencyReportingSection(
             onChooseOnMap = onChooseOnMap,
             onDismiss = { showCreateDialog = false },
             onSave = { report ->
-                repository.save(report)
+                repository.save(report.copy(originId = localNodeId ?: report.originId))
                 reports = repository.list()
                 onReportsChanged(reports)
                 showCreateDialog = false
@@ -229,7 +258,16 @@ fun EmergencyReportingSection(
     selectedReport?.let { report ->
         ReportDetailsDialog(
             report = report,
-            onDismiss = { selectedReport = null }
+            onDismiss = { selectedReport = null },
+            onLifecycleChange = { status ->
+                onLifecycleChange(report, status)
+                selectedReport = null
+            },
+            onContentUpdate = { updatedDescription ->
+                onContentUpdate(report, updatedDescription)
+                selectedReport = null
+            },
+            assistanceResponses = assistanceResponses.filter { it.emergencyId == report.id }
         )
     }
 }
@@ -615,6 +653,9 @@ private fun CreateEmergencyDialog(
                         locationChoice == LocationChoice.MANUAL && reportLocation == null -> {
                             "Enter valid latitude (-90 to 90) and longitude (-180 to 180)."
                         }
+                        !EmergencyReportValidation.isLocationDescriptionValid(locationDescription) -> {
+                            "Keep the landmark / location description under 180 characters without control characters."
+                        }
                         else -> null
                     }
                     if (validationError == null) {
@@ -625,8 +666,8 @@ private fun CreateEmergencyDialog(
                                 description = description.trim(),
                                 createdAtMillis = System.currentTimeMillis(),
                                 status = EmergencyReportStatus.LOCAL_ONLY,
-                                location = reportLocation,
-                                locationDescription = locationDescription.trim().takeIf { it.isNotBlank() }
+                                 location = reportLocation,
+                                 locationDescription = locationDescription.trim().takeIf { it.isNotBlank() }
                             )
                         )
                     }
@@ -648,8 +689,12 @@ private fun CreateEmergencyDialog(
 @Composable
 private fun ReportDetailsDialog(
     report: EmergencyReport,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onLifecycleChange: (EmergencyLifecycleStatus) -> Unit,
+    onContentUpdate: (String) -> Unit,
+    assistanceResponses: List<AssistanceResponse>
 ) {
+    var description by remember(report.id, report.contentRevision) { mutableStateOf(report.description) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(text = report.type.label) },
@@ -657,8 +702,29 @@ private fun ReportDetailsDialog(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(text = "Severity: ${report.severity.label}")
                 Text(text = "Status: ${report.status.label}")
+                Text(text = "Emergency lifecycle: ${report.lifecycleStatus.label}")
+                Text(text = "Assistance offers: ${assistanceResponses.size}", style = MaterialTheme.typography.titleSmall)
+                assistanceResponses.take(5).forEach { response ->
+                    Text("${response.responderAlias}: ${response.assistanceType.label} · ${response.status.label}", style = MaterialTheme.typography.bodySmall)
+                }
+                Text(text = "Content revision: ${report.contentRevision}")
+                Text(text = "Relay envelope: hop ${report.hopCount}, TTL ${report.remainingTtl}")
+                Text(
+                    text = if (report.contentTrust == com.resqmesh.app.data.EmergencyContentTrust.REMOTE_UNVERIFIED) {
+                        "Content origin: received over BLE and unverified"
+                    } else {
+                        "Content origin: created on this device"
+                    }
+                )
                 Text(text = "Created: ${formatTimestamp(report.createdAtMillis)}")
-                Text(text = report.description)
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    maxLines = 5
+                )
                 report.locationDescription?.let {
                     Text(text = "Landmark / location description: $it")
                 }
@@ -685,7 +751,14 @@ private fun ReportDetailsDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text(text = "Close") }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (report.lifecycleStatus == EmergencyLifecycleStatus.ACTIVE) {
+                    TextButton(onClick = { if (description.trim() != report.description.trim()) onContentUpdate(description.trim()) }) { Text("Save edit") }
+                    TextButton(onClick = { onLifecycleChange(EmergencyLifecycleStatus.RESOLVED) }) { Text("Resolve") }
+                    TextButton(onClick = { onLifecycleChange(EmergencyLifecycleStatus.CANCELLED) }) { Text("Cancel emergency") }
+                }
+                TextButton(onClick = onDismiss) { Text(text = "Close") }
+            }
         }
     )
 }

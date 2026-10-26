@@ -1,7 +1,14 @@
 package com.resqmesh.app.data
 
 object EmergencyReportValidation {
-    fun isDescriptionValid(description: String): Boolean = description.trim().isNotEmpty()
+    const val MAX_DESCRIPTION_CHARS = 240
+    const val MAX_LOCATION_DESCRIPTION_CHARS = 180
+
+    fun isDescriptionValid(description: String): Boolean =
+        isSafeText(description, MAX_DESCRIPTION_CHARS)
+
+    fun isLocationDescriptionValid(description: String): Boolean =
+        description.isBlank() || isSafeText(description, MAX_LOCATION_DESCRIPTION_CHARS)
 
     fun parseManualLocation(
         latitudeText: String,
@@ -20,4 +27,9 @@ object EmergencyReportValidation {
             isVerified = false
         )
     }
+
+    private fun isSafeText(value: String, maxChars: Int): Boolean =
+        value.trim().isNotEmpty() &&
+            value.length <= maxChars &&
+            value.none { it.isISOControl() }
 }

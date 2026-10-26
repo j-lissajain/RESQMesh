@@ -17,6 +17,8 @@ import android.os.Handler
 import android.os.Looper
 import com.resqmesh.app.data.EmergencyWireCodec
 import com.resqmesh.app.data.EmergencyReport
+import com.resqmesh.app.data.MeshRecord
+import com.resqmesh.app.data.MeshRecordCodec
 import java.nio.charset.StandardCharsets
 import java.util.ArrayDeque
 import java.util.LinkedHashMap
@@ -78,6 +80,7 @@ data class BleMessagingState(
     val connectionStatus: BleConnectionStatus = BleConnectionStatus.DISCONNECTED,
     val selectedPeerId: String? = null,
     val connectedPeerId: String? = null,
+    val connectedPeerIds: Set<String> = emptySet(),
     val messages: List<ChatMessage> = emptyList(),
     val emergencyTransmissions: Map<String, EmergencyTransmissionState> = emptyMap(),
     val error: String? = null
@@ -87,18 +90,20 @@ data class BleMessagingState(
  * Foreground-only GATT transport for the RESQMesh messaging characteristic.
  * Every phone opens a GATT server and may also open one GATT client connection.
  */
-class BleMessagingManager(context: Context) : AutoCloseable {
+class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTransport {
     private val appContext = context.applicationContext
     private val bluetoothManager = appContext.getSystemService(BluetoothManager::class.java)
     private val readinessChecker = BluetoothReadinessChecker(appContext)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val listeners = mutableSetOf<(BleMessagingState) -> Unit>()
+    private val connectionListeners = mutableSetOf<() -> Unit>()
     private val serverConnections = LinkedHashMap<String, ServerConnection>()
     private val pendingMessages = LinkedHashMap<Long, PendingOutgoingMessage>()
     private val receivedMessageIds = LinkedHashSet<Long>()
     private val messages = ArrayDeque<ChatMessage>()
     private val pendingEmergencyIds = LinkedHashMap<Long, String>()
     private var emergencyReceiver: ((EmergencyReport, String?) -> Unit)? = null
+    private var meshRecordReceiver: ((MeshRecord, String?) -> Unit)? = null
 
     private var gattServer: BluetoothGattServer? = null
     private var messageCharacteristic: BluetoothGattCharacteristic? = null
@@ -130,6 +135,15 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         listener(_state)
         return { listeners -= listener }
     }
+
+    override fun addConnectionListener(listener: () -> Unit): () -> Unit {
+        if (closed) return {}
+        connectionListeners += listener
+        listener()
+        return { connectionListeners -= listener }
+    }
+
+    override fun connectedPeerIds(): Set<String> = activePeerIds()
 
     @SuppressLint("MissingPermission")
     fun startServer() {
@@ -218,6 +232,10 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         emergencyReceiver = receiver
     }
 
+    override fun setMeshRecordReceiver(receiver: ((MeshRecord, String?) -> Unit)?) {
+        meshRecordReceiver = receiver
+    }
+
     fun selectPeer(peerId: String) {
         selectedPeerId = peerId
         publish(_state.copy(selectedPeerId = peerId))
@@ -230,6 +248,7 @@ class BleMessagingManager(context: Context) : AutoCloseable {
             pending.emergencyId?.let {
                 updateEmergencyTransmission(it, EmergencyTransmissionState.DISCONNECTED)
             }
+            pending.onFailure?.invoke(EmergencyTransportResult.DISCONNECTED, "BLE session stopped.")
         }
         pendingMessages.clear()
         pendingEmergencyIds.clear()
@@ -248,6 +267,9 @@ class BleMessagingManager(context: Context) : AutoCloseable {
                 messages = messages.toList()
             )
         )
+        if (connectionListeners.isNotEmpty()) {
+            connectionListeners.toList().forEach { it() }
+        }
     }
 
     fun connectToPeer(peer: BlePeer, localSessionId: String?) {
@@ -381,7 +403,68 @@ class BleMessagingManager(context: Context) : AutoCloseable {
             )
             return false
         }
-        val payload = runCatching { EmergencyWireCodec.encode(report, report.originId ?: localAnonymousId) }
+        return sendEmergencyOnRoute(report, route)
+    }
+
+    override fun sendEmergencyToPeer(
+        report: EmergencyReport,
+        peerId: String,
+        callback: (EmergencyTransportResult, String?) -> Unit
+    ): Boolean {
+        if (closed) return false
+        val route = findRouteForPeer(peerId) ?: return false
+        return sendEmergencyOnRoute(report, route, callback)
+    }
+
+    override fun sendMeshRecordToPeer(
+        record: MeshRecord,
+        peerId: String,
+        callback: (EmergencyTransportResult, String?) -> Unit
+    ): Boolean {
+        if (closed) return false
+        val route = findRouteForPeer(peerId) ?: return false
+        return sendRawRecordOnRoute(record, route, callback)
+    }
+
+    private fun sendRawRecordOnRoute(
+        record: MeshRecord,
+        route: RouteRef,
+        callback: (EmergencyTransportResult, String?) -> Unit
+    ): Boolean {
+        val payload = runCatching { MeshRecordCodec.encode(record) }.getOrElse { return false }
+        val messageId = BleMessageProtocol.newMessageId()
+        appendMessage(
+            ChatMessage(
+                id = BleMessageProtocol.messageIdLabel(messageId),
+                text = "Mesh ${record.type.name.lowercase()} ${record.recordId}",
+                isIncoming = false,
+                state = MessageDeliveryState.SENDING
+            )
+        )
+        val pending = PendingOutgoingMessage(
+            messageId = messageId,
+            route = route,
+            attempts = 1,
+            payload = payload,
+            onSuccess = { callback(EmergencyTransportResult.ACKNOWLEDGED, null) },
+            onFailure = { result, error -> callback(result, error) }
+        )
+        pendingMessages[messageId] = pending
+        if (!sendFrame(route, BleFrameType.MESSAGE, messageId, payload)) {
+            pendingMessages.remove(messageId)
+            callback(EmergencyTransportResult.FAILED, "Mesh record could not be queued.")
+            return false
+        }
+        scheduleAckTimeout(pending)
+        return true
+    }
+
+    private fun sendEmergencyOnRoute(
+        report: EmergencyReport,
+        route: RouteRef,
+        callback: ((EmergencyTransportResult, String?) -> Unit)? = null
+    ): Boolean {
+        val payload = runCatching { EmergencyWireCodec.encode(report, report.originId) }
             .getOrElse {
                 publish(
                     _state.copy(
@@ -409,7 +492,9 @@ class BleMessagingManager(context: Context) : AutoCloseable {
             attempts = 1,
             payload = payload,
             kind = ChatMessageKind.EMERGENCY,
-            emergencyId = report.id
+            emergencyId = report.id,
+            onSuccess = { callback?.invoke(EmergencyTransportResult.ACKNOWLEDGED, null) },
+            onFailure = { result, error -> callback?.invoke(result, error) }
         )
         pendingMessages[messageId] = pending
         pendingEmergencyIds[messageId] = report.id
@@ -437,6 +522,7 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         stopSession()
         closed = true
         listeners.clear()
+        connectionListeners.clear()
         mainHandler.removeCallbacksAndMessages(null)
     }
 
@@ -447,6 +533,8 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         val payload: ByteArray,
         val kind: ChatMessageKind = ChatMessageKind.CHAT,
         val emergencyId: String? = null,
+        val onSuccess: (() -> Unit)? = null,
+        val onFailure: ((EmergencyTransportResult, String?) -> Unit)? = null,
         var timeout: Runnable? = null
     )
 
@@ -830,13 +918,23 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         }
 
         val emergency = EmergencyWireCodec.decode(payload)
+        val meshRecord = MeshRecordCodec.decode(payload)
         if (text.startsWith(EmergencyWireCodec.DISCRIMINATOR) && emergency == null) {
             updateError("A malformed or unsupported emergency report was rejected.")
             return
         }
+        if (text.startsWith(MeshRecordCodec.DISCRIMINATOR) && meshRecord == null) {
+            updateError("A malformed or unsupported coordination record was rejected.")
+            return
+        }
+        if (meshRecord != null) {
+            meshRecordReceiver?.invoke(meshRecord, route.peerId)
+        }
         val incomingText = if (emergency != null) {
             emergencyReceiver?.invoke(EmergencyWireCodec.toReceivedReport(emergency, route.peerId), route.peerId)
             "Emergency report ${emergency.emergencyId} received"
+        } else if (meshRecord != null) {
+            "${meshRecord.type.name.lowercase().replace('_', ' ')} received"
         } else {
             text
         }
@@ -859,6 +957,7 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         updateMessageState(messageId, MessageDeliveryState.DELIVERED)
         pending.emergencyId?.let { updateEmergencyTransmission(it, EmergencyTransmissionState.TRANSPORT_ACKNOWLEDGED) }
         pendingEmergencyIds.remove(messageId)
+        pending.onSuccess?.invoke()
     }
 
     private fun sendAcknowledgement(route: RouteRef, messageId: Long) {
@@ -1056,6 +1155,25 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         }
     }
 
+    private fun findRouteForPeer(peerId: String): RouteRef? {
+        if (clientReady && clientPeerId == peerId && clientDeviceAddress != null) {
+            return RouteRef(
+                side = TransportSide.CLIENT,
+                deviceAddress = clientDeviceAddress.orEmpty(),
+                peerId = clientPeerId
+            )
+        }
+        return serverConnections.values.firstOrNull {
+            it.notificationsEnabled && it.remotePeerId == peerId
+        }?.let { connection ->
+            RouteRef(
+                side = TransportSide.SERVER,
+                deviceAddress = connection.device.address,
+                peerId = connection.remotePeerId
+            )
+        }
+    }
+
     private fun isConnectedTo(peerId: String): Boolean =
         (clientReady && clientPeerId == peerId) ||
             serverConnections.values.any { it.notificationsEnabled && it.remotePeerId == peerId }
@@ -1074,12 +1192,14 @@ class BleMessagingManager(context: Context) : AutoCloseable {
                         pendingEmergencyIds.remove(current.messageId)
                         updateEmergencyTransmission(it, EmergencyTransmissionState.FAILED)
                     }
+                    current.onFailure?.invoke(EmergencyTransportResult.FAILED, "BLE resend could not be queued.")
                 }
             } else {
+                val routeAvailable = routeIsAvailable(current.route)
                 pendingMessages.remove(current.messageId)
                 updateMessageState(
                     current.messageId,
-                    if (routeIsAvailable(current.route)) {
+                    if (routeAvailable) {
                         MessageDeliveryState.FAILED
                     } else {
                         MessageDeliveryState.DISCONNECTED
@@ -1087,15 +1207,19 @@ class BleMessagingManager(context: Context) : AutoCloseable {
                 )
                 current.emergencyId?.let {
                     pendingEmergencyIds.remove(current.messageId)
-                    updateEmergencyTransmission(
+                        updateEmergencyTransmission(
                         it,
-                        if (routeIsAvailable(current.route)) {
+                        if (routeAvailable) {
                             EmergencyTransmissionState.FAILED
                         } else {
                             EmergencyTransmissionState.DISCONNECTED
                         }
                     )
                 }
+                current.onFailure?.invoke(
+                    if (routeAvailable) EmergencyTransportResult.FAILED else EmergencyTransportResult.DISCONNECTED,
+                    if (routeAvailable) "Transport acknowledgement timed out." else "BLE peer disconnected."
+                )
             }
         }
         pending.timeout = timeout
@@ -1144,6 +1268,18 @@ class BleMessagingManager(context: Context) : AutoCloseable {
                     )
                     pendingEmergencyIds.remove(pending.messageId)
                 }
+                pending.onFailure?.invoke(
+                    if (finalState == MessageDeliveryState.DISCONNECTED) {
+                        EmergencyTransportResult.DISCONNECTED
+                    } else {
+                        EmergencyTransportResult.FAILED
+                    },
+                    if (finalState == MessageDeliveryState.DISCONNECTED) {
+                        "BLE peer disconnected."
+                    } else {
+                        "BLE delivery failed."
+                    }
+                )
                 iterator.remove()
             }
         }
@@ -1301,17 +1437,15 @@ class BleMessagingManager(context: Context) : AutoCloseable {
     }
 
     private fun refreshConnectionState() {
-        val clientConnected = clientReady && clientPeerId != null
-        val serverConnection = serverConnections.values.firstOrNull {
-            it.notificationsEnabled && it.remotePeerId != null
+        val connectedIds = activePeerIds()
+        val connectionsChanged = connectedIds != _state.connectedPeerIds
+        val connectedId = when {
+            clientReady && clientPeerId != null -> clientPeerId
+            else -> connectedIds.firstOrNull()
         }
-        val connectedId = if (clientConnected) clientPeerId else serverConnection?.remotePeerId
         selectedPeerId = BlePeerSelection.retainOrChoose(
             currentPeerId = selectedPeerId,
-            activePeerIds = buildList {
-                connectedId?.let(::add)
-                serverConnection?.remotePeerId?.let { if (it != connectedId) add(it) }
-            }
+            activePeerIds = connectedIds.toList()
         )
         val status = when {
             connectedId != null -> BleConnectionStatus.CONNECTED
@@ -1326,9 +1460,11 @@ class BleMessagingManager(context: Context) : AutoCloseable {
                 serverReady = gattServer != null,
                 connectionStatus = status,
                 selectedPeerId = selectedPeerId,
-                connectedPeerId = connectedId
+                connectedPeerId = connectedId,
+                connectedPeerIds = connectedIds
             )
         )
+        if (connectionsChanged) connectionListeners.toList().forEach { it() }
     }
 
     private fun handleServerResponseFailure(message: String) {
@@ -1401,6 +1537,14 @@ class BleMessagingManager(context: Context) : AutoCloseable {
         else -> serverConnections.values.firstOrNull {
             it.notificationsEnabled && it.remotePeerId != null
         }?.remotePeerId
+    }
+
+    private fun activePeerIds(): Set<String> = buildSet {
+        if (clientReady) clientPeerId?.let(::add)
+        serverConnections.values
+            .filter { it.notificationsEnabled }
+            .mapNotNull { it.remotePeerId }
+            .forEach(::add)
     }
 
     private fun publish(newState: BleMessagingState) {

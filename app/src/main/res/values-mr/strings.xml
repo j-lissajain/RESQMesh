@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">RESQMesh</string>
+    <string name="instant_sos">त्वरित SOS</string>
+    <string name="instant_sos_description">या डिव्हाइसवर आपत्काल जतन करा आणि रांगेत ठेवा</string>
+    <string name="coordination_title">स्वयंसेवक आणि संसाधन समन्वय</string>
+    <string name="language">भाषा</string>
+    <string name="english">English</string>
+    <string name="hindi">हिंदी</string>
+    <string name="marathi">मराठी</string>
+    <string name="saved_locally">स्थानिकरित्या जतन केले</string>
+    <string name="waiting_for_peer">जवळच्या डिव्हाइसची प्रतीक्षा</string>
+    <string name="transport_acknowledged">पीअरपर्यंत पोहोचले; मदत स्वीकारली असे नाही</string>
+    <string name="unverified_content">मिळालेली माहिती पडताळलेली नाही</string>
+</resources>
