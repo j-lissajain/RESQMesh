@@ -1,5 +1,8 @@
 package com.resqmesh.app.ui.components
 
+import android.Manifest
+import android.content.Intent
+import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -37,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -49,6 +53,8 @@ import com.resqmesh.app.data.EmergencySeverity
 import com.resqmesh.app.data.EmergencyType
 import com.resqmesh.app.data.EmergencyLifecycleStatus
 import com.resqmesh.app.data.AssistanceResponse
+import com.resqmesh.app.data.LanguagePreference
+import com.resqmesh.app.data.localizedLabel
 import com.resqmesh.app.data.withLifecycleStatus
 import com.resqmesh.app.data.EmergencyReportValidation
 import com.resqmesh.app.data.LocalEmergencyRepository
@@ -63,6 +69,8 @@ import com.resqmesh.app.location.LocationStatus
 import com.resqmesh.app.location.OfflineLocationEngine
 import com.resqmesh.app.ui.theme.EmergencyAmber
 import com.resqmesh.app.ui.theme.EmergencySurface
+import com.resqmesh.app.ui.localizedText
+import com.resqmesh.app.R
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -83,6 +91,8 @@ fun EmergencyReportingSection(
     onLifecycleChange: (EmergencyReport, EmergencyLifecycleStatus) -> Unit = { _, _ -> },
     onContentUpdate: (EmergencyReport, String) -> Unit = { _, _ -> },
     assistanceResponses: List<AssistanceResponse> = emptyList(),
+    simplifiedEmergencyMode: Boolean = false,
+    languagePreference: LanguagePreference = LanguagePreference.ENGLISH,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -148,7 +158,7 @@ fun EmergencyReportingSection(
         } else {
             locationState = locationState.copy(
                 status = LocationStatus.PERMISSION_REQUIRED,
-                message = "Location permission was denied. Reports can still be saved without a location or with manual coordinates."
+                 message = context.getString(R.string.location_permission_denied)
             )
         }
     }
@@ -164,14 +174,14 @@ fun EmergencyReportingSection(
                 .verticalScroll(rememberScrollState())
         ) {
             Text(
-                text = "Emergency reports",
+                 text = stringResource(R.string.emergency_reports),
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Saved on this device. Connect to a nearby peer to send a report over BLE. A transport acknowledgement is not responder acceptance.",
+                 text = stringResource(R.string.emergency_reports_description),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall
             )
@@ -203,13 +213,13 @@ fun EmergencyReportingSection(
                 shape = RoundedCornerShape(12.dp),
                 contentPadding = PaddingValues(vertical = 13.dp)
             ) {
-                Text(text = "Create emergency", fontWeight = FontWeight.Bold)
+                Text(text = stringResource(R.string.create_emergency), fontWeight = FontWeight.Bold)
             }
 
             Spacer(modifier = Modifier.height(16.dp))
             if (reports.isEmpty()) {
                 Text(
-                    text = "No locally saved emergencies yet.",
+                    text = stringResource(R.string.no_saved_emergencies),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -250,7 +260,9 @@ fun EmergencyReportingSection(
                 reports = repository.list()
                 onReportsChanged(reports)
                 showCreateDialog = false
-            }
+            },
+            simplifiedEmergencyMode = simplifiedEmergencyMode
+            , languagePreference = languagePreference
         )
     }
 
@@ -289,13 +301,13 @@ private fun LocationStatusCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = "Offline location",
+                 text = stringResource(R.string.offline_location),
                     color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = locationStatusLabel(state.status),
+                     text = locationStatusLabel(state.status),
                     color = locationStatusColor(state.status),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold
@@ -318,12 +330,12 @@ private fun LocationStatusCard(
                 )
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
-                    text = "Accuracy: ${reading.accuracyMeters?.let { "%.1f m".format(it) } ?: "not reported"} · Age: ${formatAge(nowMillis - reading.timestampMillis)}",
+                     text = stringResource(R.string.accuracy_age, reading.accuracyMeters?.let { "%.1f m".format(it) } ?: stringResource(R.string.not_reported), formatAge(nowMillis - reading.timestampMillis)),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
                 Text(
-                    text = "Source: ${reading.source.label}${if (!reading.precisePermission) " · approximate permission" else ""}",
+                     text = stringResource(R.string.location_source, reading.source.localizedText()) + if (!reading.precisePermission) " · ${stringResource(R.string.approximate_permission)}" else "",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -350,7 +362,7 @@ private fun LocationStatusCard(
                     shape = RoundedCornerShape(10.dp),
                     contentPadding = PaddingValues(vertical = 10.dp)
                 ) {
-                    Text(text = if (state.isRefreshing) "Getting fix..." else "Refresh location")
+                     Text(text = if (state.isRefreshing) stringResource(R.string.getting_fix) else stringResource(R.string.refresh_location))
                 }
                 OutlinedButton(
                     onClick = onClear,
@@ -359,7 +371,7 @@ private fun LocationStatusCard(
                     shape = RoundedCornerShape(10.dp),
                     contentPadding = PaddingValues(vertical = 10.dp)
                 ) {
-                    Text(text = "Clear")
+                     Text(text = stringResource(R.string.clear))
                 }
             }
         }
@@ -385,13 +397,13 @@ private fun ReportSummaryCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = report.type.label,
+                     text = report.type.localizedText(),
                     color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = report.severity.label,
+                     text = report.severity.localizedText(),
                     color = EmergencyAmber,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold
@@ -406,13 +418,13 @@ private fun ReportSummaryCard(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "${report.status.label} · ${formatTimestamp(report.createdAtMillis)}",
+                 text = "${report.status.localizedText()} · ${formatTimestamp(report.createdAtMillis)}",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall
             )
             report.receivedFromPeerId?.let {
                 Text(
-                    text = "Received from nearby peer",
+                     text = stringResource(R.string.received_from_peer),
                     color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.labelSmall
                 )
@@ -421,7 +433,7 @@ private fun ReportSummaryCard(
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(onClick = onClick, modifier = Modifier.weight(1f)) {
-                        Text("Details")
+                         Text(stringResource(R.string.details))
                     }
                     Button(
                         onClick = onSend,
@@ -434,11 +446,11 @@ private fun ReportSummaryCard(
                     ) {
                         Text(
                             when (transmissionState) {
-                                EmergencyTransmissionState.SENDING -> "Sending…"
-                                EmergencyTransmissionState.TRANSPORT_ACKNOWLEDGED -> "Acknowledged"
+                                 EmergencyTransmissionState.SENDING -> stringResource(R.string.sending)
+                                 EmergencyTransmissionState.TRANSPORT_ACKNOWLEDGED -> stringResource(R.string.acknowledged)
                                 EmergencyTransmissionState.FAILED,
-                                EmergencyTransmissionState.DISCONNECTED -> "Retry"
-                                else -> "Send"
+                                 EmergencyTransmissionState.DISCONNECTED -> stringResource(R.string.retry)
+                                 else -> stringResource(R.string.send)
                             }
                         )
                     }
@@ -446,11 +458,11 @@ private fun ReportSummaryCard(
                 transmissionState?.let { state ->
                     Text(
                         text = when (state) {
-                            EmergencyTransmissionState.READY_TO_SEND -> "Ready to send when a peer is connected."
-                            EmergencyTransmissionState.SENDING -> "Sending over the active BLE connection…"
-                            EmergencyTransmissionState.TRANSPORT_ACKNOWLEDGED -> "Transport acknowledged. This does not mean a responder accepted it."
-                            EmergencyTransmissionState.FAILED -> "Transmission failed. The report remains saved locally."
-                            EmergencyTransmissionState.DISCONNECTED -> "Connection lost. Retry when a peer reconnects."
+                             EmergencyTransmissionState.READY_TO_SEND -> stringResource(R.string.ready_to_send)
+                             EmergencyTransmissionState.SENDING -> stringResource(R.string.sending_ble)
+                             EmergencyTransmissionState.TRANSPORT_ACKNOWLEDGED -> stringResource(R.string.transport_acknowledged_explanation)
+                             EmergencyTransmissionState.FAILED -> stringResource(R.string.transmission_failed_local)
+                             EmergencyTransmissionState.DISCONNECTED -> stringResource(R.string.connection_lost_retry)
                         },
                         color = if (state == EmergencyTransmissionState.TRANSPORT_ACKNOWLEDGED) {
                             MaterialTheme.colorScheme.primary
@@ -478,7 +490,9 @@ private fun CreateEmergencyDialog(
     mapLocation: EmergencyLocation?,
     onChooseOnMap: () -> Unit,
     onDismiss: () -> Unit,
-    onSave: (EmergencyReport) -> Unit
+    onSave: (EmergencyReport) -> Unit,
+    simplifiedEmergencyMode: Boolean = false,
+    languagePreference: LanguagePreference = LanguagePreference.ENGLISH
 ) {
     var type by rememberSaveable { mutableStateOf(EmergencyType.MEDICAL) }
     var severity by rememberSaveable { mutableStateOf(EmergencySeverity.HIGH) }
@@ -493,6 +507,26 @@ private fun CreateEmergencyDialog(
         )
     }
     var validationError by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val speechLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            ?.firstOrNull()
+            ?.let { description = it }
+    }
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            speechLauncher.launch(
+                Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                     putExtra(RecognizerIntent.EXTRA_PROMPT, context.getString(R.string.speak_emergency_description))
+                }
+            )
+        }
+    }
 
     LaunchedEffect(mapLocation) {
         if (mapLocation != null) locationChoice = LocationChoice.MAP
@@ -501,7 +535,7 @@ private fun CreateEmergencyDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
-        title = { Text(text = "Create emergency") },
+         title = { Text(text = stringResource(R.string.create_emergency)) },
         text = {
             Column(
                 modifier = Modifier
@@ -509,37 +543,62 @@ private fun CreateEmergencyDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(text = "Emergency type", fontWeight = FontWeight.Bold)
-                EmergencyType.entries.forEach { candidate ->
-                    FilterChip(
-                        selected = type == candidate,
-                        onClick = { type = candidate },
-                        label = { Text(candidate.label) },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(text = "Severity", fontWeight = FontWeight.Bold)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    EmergencySeverity.entries.forEach { candidate ->
+                if (simplifiedEmergencyMode) {
+                     Text(stringResource(R.string.simplified_emergency_note), style = MaterialTheme.typography.bodySmall)
+                    type = EmergencyType.OTHER
+                } else {
+                     Text(text = stringResource(R.string.emergency_type), fontWeight = FontWeight.Bold)
+                    EmergencyType.entries.forEach { candidate ->
                         FilterChip(
-                            selected = severity == candidate,
-                            onClick = { severity = candidate },
-                            label = { Text(candidate.label) }
+                            selected = type == candidate,
+                            onClick = { type = candidate },
+                             label = { Text(candidate.localizedText()) },
+                            modifier = Modifier.fillMaxWidth()
                         )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                     Text(text = stringResource(R.string.severity), fontWeight = FontWeight.Bold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        EmergencySeverity.entries.forEach { candidate ->
+                            FilterChip(
+                                selected = severity == candidate,
+                                onClick = { severity = candidate },
+                                 label = { Text(candidate.localizedText()) }
+                            )
+                        }
                     }
                 }
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Short description") },
-                    placeholder = { Text("What help is needed?") },
+                     label = { Text(stringResource(R.string.short_description)) },
+                     placeholder = { Text(stringResource(R.string.help_needed_hint)) },
                     minLines = 3,
                     maxLines = 5,
                     isError = validationError != null
                 )
-                Text(text = "Location (optional)", fontWeight = FontWeight.Bold)
+                OutlinedButton(
+                    onClick = {
+                        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.RECORD_AUDIO
+                            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        ) {
+                            speechLauncher.launch(
+                                Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                    putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak the emergency description")
+                                }
+                            )
+                        } else {
+                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(stringResource(R.string.use_voice_input_once)) }
+                 Text(stringResource(R.string.voice_input_note), style = MaterialTheme.typography.bodySmall)
+                 Text(text = stringResource(R.string.location_optional), fontWeight = FontWeight.Bold)
                 FilterChip(
                     selected = locationChoice == LocationChoice.CURRENT,
                     onClick = {
@@ -549,12 +608,10 @@ private fun CreateEmergencyDialog(
                     label = {
                         Text(
                             if (locationState.reading == null) {
-                                "Current device location unavailable"
+                                 stringResource(R.string.current_location_unavailable)
                             } else {
                                 val reading = locationState.reading!!
-                                "Use current device location\n" +
-                                        "Lat: ${formatCoordinate(reading.latitude)}, " +
-                                        "Lon: ${formatCoordinate(reading.longitude)}"
+                                 stringResource(R.string.use_current_location, formatCoordinate(reading.latitude), formatCoordinate(reading.longitude))
                             }
                         )
                     },
@@ -565,8 +622,8 @@ private fun CreateEmergencyDialog(
                     onClick = onChooseOnMap,
                     label = {
                         Text(
-                            if (mapLocation == null) "Choose on offline Nagpur map"
-                            else "Map pin: ${formatCoordinate(mapLocation.latitude)}, ${formatCoordinate(mapLocation.longitude)}"
+                             if (mapLocation == null) stringResource(R.string.choose_offline_map)
+                             else stringResource(R.string.map_pin, formatCoordinate(mapLocation.latitude), formatCoordinate(mapLocation.longitude))
                         )
                     },
                     modifier = Modifier.fillMaxWidth()
@@ -574,13 +631,13 @@ private fun CreateEmergencyDialog(
                 FilterChip(
                     selected = locationChoice == LocationChoice.MANUAL,
                     onClick = { locationChoice = LocationChoice.MANUAL },
-                    label = { Text("Advanced: enter coordinates (unverified)") },
+                     label = { Text(stringResource(R.string.manual_coordinates)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 FilterChip(
                     selected = locationChoice == LocationChoice.NONE,
                     onClick = { locationChoice = LocationChoice.NONE },
-                    label = { Text("Save without a location") },
+                     label = { Text(stringResource(R.string.save_without_location)) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 if (locationChoice == LocationChoice.MANUAL) {
@@ -589,7 +646,7 @@ private fun CreateEmergencyDialog(
                             value = latitude,
                             onValueChange = { latitude = it },
                             modifier = Modifier.weight(1f),
-                            label = { Text("Latitude") },
+                             label = { Text(stringResource(R.string.latitude)) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             singleLine = true
                         )
@@ -597,20 +654,20 @@ private fun CreateEmergencyDialog(
                             value = longitude,
                             onValueChange = { longitude = it },
                             modifier = Modifier.weight(1f),
-                            label = { Text("Longitude") },
+                             label = { Text(stringResource(R.string.longitude)) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             singleLine = true
                         )
                     }
                     Text(
-                        text = "Manual coordinates are stored as unverified and are not treated as device location.",
+                         text = stringResource(R.string.manual_coordinates_note),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
                 if (locationChoice == LocationChoice.MAP && mapLocation != null) {
                     Text(
-                        text = "Map-selected coordinates are stored as manually selected and unverified.",
+                         text = stringResource(R.string.map_coordinates_note),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -619,8 +676,8 @@ private fun CreateEmergencyDialog(
                     value = locationDescription,
                     onValueChange = { locationDescription = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Optional landmark / location description") },
-                    placeholder = { Text("Near the main entrance, behind the hostel building.") },
+                     label = { Text(stringResource(R.string.landmark_optional)) },
+                     placeholder = { Text(stringResource(R.string.landmark_hint)) },
                     minLines = 2,
                     maxLines = 4
                 )
@@ -643,18 +700,18 @@ private fun CreateEmergencyDialog(
                         LocationChoice.NONE -> null
                     }
                     validationError = when {
-                        !EmergencyReportValidation.isDescriptionValid(description) -> "Enter a short description."
+                        !EmergencyReportValidation.isDescriptionValid(description) -> context.getString(R.string.validation_short_description)
                         locationChoice == LocationChoice.CURRENT && reportLocation == null -> {
-                            "The current device location is no longer available. Refresh or choose another option."
+                            context.getString(R.string.validation_current_location)
                         }
                         locationChoice == LocationChoice.MAP && reportLocation == null -> {
-                            "Choose a point on the offline map before saving."
+                            context.getString(R.string.validation_map_location)
                         }
                         locationChoice == LocationChoice.MANUAL && reportLocation == null -> {
-                            "Enter valid latitude (-90 to 90) and longitude (-180 to 180)."
+                            context.getString(R.string.validation_coordinates)
                         }
                         !EmergencyReportValidation.isLocationDescriptionValid(locationDescription) -> {
-                            "Keep the landmark / location description under 180 characters without control characters."
+                            context.getString(R.string.validation_landmark)
                         }
                         else -> null
                     }
@@ -677,11 +734,11 @@ private fun CreateEmergencyDialog(
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 )
             ) {
-                Text(text = "Save locally", fontWeight = FontWeight.Bold)
+                Text(text = stringResource(R.string.save_locally), fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(text = "Cancel") }
+            TextButton(onClick = onDismiss) { Text(text = stringResource(R.string.cancel)) }
         }
     )
 }
@@ -697,55 +754,55 @@ private fun ReportDetailsDialog(
     var description by remember(report.id, report.contentRevision) { mutableStateOf(report.description) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(text = report.type.label) },
+         title = { Text(text = report.type.localizedText()) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(text = "Severity: ${report.severity.label}")
-                Text(text = "Status: ${report.status.label}")
-                Text(text = "Emergency lifecycle: ${report.lifecycleStatus.label}")
-                Text(text = "Assistance offers: ${assistanceResponses.size}", style = MaterialTheme.typography.titleSmall)
-                assistanceResponses.take(5).forEach { response ->
-                    Text("${response.responderAlias}: ${response.assistanceType.label} · ${response.status.label}", style = MaterialTheme.typography.bodySmall)
-                }
-                Text(text = "Content revision: ${report.contentRevision}")
-                Text(text = "Relay envelope: hop ${report.hopCount}, TTL ${report.remainingTtl}")
-                Text(
-                    text = if (report.contentTrust == com.resqmesh.app.data.EmergencyContentTrust.REMOTE_UNVERIFIED) {
-                        "Content origin: received over BLE and unverified"
-                    } else {
-                        "Content origin: created on this device"
-                    }
-                )
-                Text(text = "Created: ${formatTimestamp(report.createdAtMillis)}")
+                 Text(text = stringResource(R.string.detail_severity, report.severity.localizedText()))
+                 Text(text = stringResource(R.string.detail_status, report.status.localizedText()))
+                 Text(text = stringResource(R.string.detail_lifecycle, report.lifecycleStatus.localizedText()))
+                 Text(text = stringResource(R.string.assistance_offers, assistanceResponses.size), style = MaterialTheme.typography.titleSmall)
+                 assistanceResponses.take(5).forEach { response ->
+                     Text("${response.responderAlias}: ${response.assistanceType.localizedText()} · ${response.status.localizedText()}", style = MaterialTheme.typography.bodySmall)
+                 }
+                 Text(text = stringResource(R.string.content_revision, report.contentRevision))
+                 Text(text = stringResource(R.string.relay_envelope, report.hopCount, report.remainingTtl))
+                 Text(
+                     text = if (report.contentTrust == com.resqmesh.app.data.EmergencyContentTrust.REMOTE_UNVERIFIED) {
+                         stringResource(R.string.content_origin_unverified)
+                     } else {
+                         stringResource(R.string.content_origin_local)
+                     }
+                 )
+                 Text(text = stringResource(R.string.created_at, formatTimestamp(report.createdAtMillis)))
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Description") },
+                     label = { Text(stringResource(R.string.description)) },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
                     maxLines = 5
                 )
                 report.locationDescription?.let {
-                    Text(text = "Landmark / location description: $it")
+                     Text(text = stringResource(R.string.landmark_value, it))
                 }
                 val location = report.location
                 if (location == null) {
-                    Text(text = "Location: not provided")
+                     Text(text = stringResource(R.string.location_not_provided))
                 } else {
                     Text(
-                        text = "Location: ${formatCoordinate(location.latitude)}, ${formatCoordinate(location.longitude)}"
+                         text = stringResource(R.string.location_value, formatCoordinate(location.latitude), formatCoordinate(location.longitude))
                     )
                     Text(
-                        text = "Location source: ${location.source.label}"
+                         text = stringResource(R.string.location_source, location.source.localizedText())
                     )
                     Text(
-                        text = "Accuracy: ${location.accuracyMeters?.let { "%.1f m".format(it) } ?: "not reported"}"
+                         text = stringResource(R.string.accuracy_value, location.accuracyMeters?.let { "%.1f m".format(it) } ?: stringResource(R.string.not_reported))
                     )
-                    Text(text = "Location reading: ${formatTimestamp(location.timestampMillis)}")
-                    Text(text = "Physical location is not independently verified.")
+                     Text(text = stringResource(R.string.location_reading, formatTimestamp(location.timestampMillis)))
+                     Text(text = stringResource(R.string.location_not_verified))
                 }
                 Text(
-                    text = "Emergency ID: ${report.id}",
+                     text = stringResource(R.string.emergency_id, report.id),
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -753,11 +810,11 @@ private fun ReportDetailsDialog(
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (report.lifecycleStatus == EmergencyLifecycleStatus.ACTIVE) {
-                    TextButton(onClick = { if (description.trim() != report.description.trim()) onContentUpdate(description.trim()) }) { Text("Save edit") }
-                    TextButton(onClick = { onLifecycleChange(EmergencyLifecycleStatus.RESOLVED) }) { Text("Resolve") }
-                    TextButton(onClick = { onLifecycleChange(EmergencyLifecycleStatus.CANCELLED) }) { Text("Cancel emergency") }
+                     TextButton(onClick = { if (description.trim() != report.description.trim()) onContentUpdate(description.trim()) }) { Text(stringResource(R.string.save_edit)) }
+                     TextButton(onClick = { onLifecycleChange(EmergencyLifecycleStatus.RESOLVED) }) { Text(stringResource(R.string.resolve)) }
+                     TextButton(onClick = { onLifecycleChange(EmergencyLifecycleStatus.CANCELLED) }) { Text(stringResource(R.string.cancel_emergency)) }
                 }
-                TextButton(onClick = onDismiss) { Text(text = "Close") }
+                 TextButton(onClick = onDismiss) { Text(text = stringResource(R.string.close)) }
             }
         }
     )
@@ -772,13 +829,14 @@ private fun DeviceLocationReading.toEmergencyLocation(): EmergencyLocation = Eme
     isVerified = false
 )
 
+@Composable
 private fun locationStatusLabel(status: LocationStatus): String = when (status) {
-    LocationStatus.PERMISSION_REQUIRED -> "Permission needed"
-    LocationStatus.ACQUIRING -> "Acquiring"
-    LocationStatus.FRESH -> "Fresh"
-    LocationStatus.STALE -> "Stale/cached"
-    LocationStatus.LOW_ACCURACY -> "Low accuracy"
-    LocationStatus.UNAVAILABLE -> "Unavailable"
+    LocationStatus.PERMISSION_REQUIRED -> stringResource(R.string.location_status_permission)
+    LocationStatus.ACQUIRING -> stringResource(R.string.location_status_acquiring)
+    LocationStatus.FRESH -> stringResource(R.string.location_status_fresh)
+    LocationStatus.STALE -> stringResource(R.string.location_status_stale)
+    LocationStatus.LOW_ACCURACY -> stringResource(R.string.location_status_low_accuracy)
+    LocationStatus.UNAVAILABLE -> stringResource(R.string.location_status_unavailable)
 }
 
 @Composable

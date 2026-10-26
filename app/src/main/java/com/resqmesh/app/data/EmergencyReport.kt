@@ -51,6 +51,7 @@ enum class EmergencyReportStatus(val label: String) {
 
 enum class EmergencyContentTrust {
     LOCAL_ORIGINATED,
+    REMOTE_AUTHENTICATED,
     REMOTE_UNVERIFIED;
 
     companion object {

@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
+import com.resqmesh.app.R
 
 object BluetoothPermissions {
     fun requiredPermissions(): Array<String> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -22,10 +23,10 @@ object BluetoothPermissions {
         ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
     }
 
-    fun permissionLabel(): String = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        "Nearby devices"
+    fun permissionLabel(context: Context): String = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        context.getString(R.string.nearby_devices_permission)
     } else {
-        "Location"
+        context.getString(R.string.location_permission)
     }
 }
 
@@ -79,6 +80,7 @@ class BluetoothReadinessChecker(private val context: Context) {
             requiredPermissionsGranted = permissionsGranted,
             bleAdvertisingSupported = bleAdvertisingSupported,
             guidance = guidanceFor(
+                context = context,
                 bluetoothSupported = bluetoothSupported,
                 bleSupported = bleSupported,
                 bluetoothEnabled = bluetoothEnabled,
@@ -89,19 +91,20 @@ class BluetoothReadinessChecker(private val context: Context) {
     }
 
     private fun guidanceFor(
+        context: Context,
         bluetoothSupported: Boolean,
         bleSupported: Boolean,
         bluetoothEnabled: Boolean?,
         permissionsGranted: Boolean,
         bleAdvertisingSupported: Boolean?
     ): String = when {
-        !bluetoothSupported -> "This phone does not support Bluetooth."
-        !bleSupported -> "Bluetooth is available, but Bluetooth Low Energy is not supported on this phone."
-        !permissionsGranted -> "Allow ${BluetoothPermissions.permissionLabel()} access to check BLE readiness."
-        bluetoothEnabled == false -> "Turn on Bluetooth in system settings to prepare this phone."
-        bluetoothEnabled == null -> "Bluetooth status could not be checked yet. Refresh after granting permissions."
-        bleAdvertisingSupported == false -> "BLE is available, but this phone cannot advertise as a BLE peripheral."
-        bleAdvertisingSupported == null -> "BLE advertising support could not be checked yet."
-        else -> "Ready for BLE discovery. Scanning and advertising can be started from the dashboard."
+        !bluetoothSupported -> context.getString(R.string.bluetooth_not_supported)
+        !bleSupported -> context.getString(R.string.ble_not_supported)
+        !permissionsGranted -> context.getString(R.string.allow_ble_permission, BluetoothPermissions.permissionLabel(context))
+        bluetoothEnabled == false -> context.getString(R.string.turn_on_bluetooth)
+        bluetoothEnabled == null -> context.getString(R.string.bluetooth_status_unknown)
+        bleAdvertisingSupported == false -> context.getString(R.string.ble_advertising_not_supported)
+        bleAdvertisingSupported == null -> context.getString(R.string.ble_advertising_unknown)
+        else -> context.getString(R.string.ble_ready)
     }
 }

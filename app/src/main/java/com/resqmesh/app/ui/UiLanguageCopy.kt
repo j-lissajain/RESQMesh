@@ -1,5 +1,8 @@
 package com.resqmesh.app.ui
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.resqmesh.app.R
 import com.resqmesh.app.data.LanguagePreference
 
 data class UiLanguageCopy(
@@ -11,14 +14,12 @@ data class UiLanguageCopy(
     val safety: String
 )
 
-fun languageCopy(language: LanguagePreference): UiLanguageCopy = when (language) {
-    LanguagePreference.ENGLISH -> UiLanguageCopy(
-        "Offline emergency coordination", "INSTANT SOS", "Volunteer and resource coordination", "Volunteers", "Resources", "Safety"
-    )
-    LanguagePreference.HINDI -> UiLanguageCopy(
-        "ऑफ़लाइन आपातकालीन समन्वय", "तुरंत SOS", "स्वयंसेवक और संसाधन समन्वय", "स्वयंसेवक", "संसाधन", "सुरक्षा"
-    )
-    LanguagePreference.MARATHI -> UiLanguageCopy(
-        "ऑफलाइन आपत्कालीन समन्वय", "त्वरित SOS", "स्वयंसेवक आणि संसाधन समन्वय", "स्वयंसेवक", "संसाधने", "सुरक्षा"
-    )
-}
+@Composable
+fun languageCopy(@Suppress("UNUSED_PARAMETER") language: LanguagePreference): UiLanguageCopy = UiLanguageCopy(
+    appTagline = stringResource(R.string.offline_emergency_coordination),
+    instantSos = stringResource(R.string.instant_sos),
+    coordination = stringResource(R.string.coordination_title),
+    volunteer = stringResource(R.string.tab_volunteers),
+    resources = stringResource(R.string.tab_resources),
+    safety = stringResource(R.string.tab_safety)
+)

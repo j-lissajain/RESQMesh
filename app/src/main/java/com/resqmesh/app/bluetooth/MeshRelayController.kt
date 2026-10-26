@@ -18,6 +18,7 @@ import com.resqmesh.app.data.toVolunteerProfile
 import com.resqmesh.app.data.toMeshRecord
 import com.resqmesh.app.data.EmergencyReportJsonCodec
 import com.resqmesh.app.data.EmergencyLifecycleStatus
+import com.resqmesh.app.security.MeshTrustState
 import android.os.Handler
 import android.os.Looper
 
@@ -169,7 +170,7 @@ class MeshRelayController(
     }
 
     fun setReceiver() {
-        transport.setMeshRecordReceiver { record, peerId -> onIncoming(record, peerId) }
+        transport.setMeshRecordReceiver { record, peerId, trust -> onIncoming(record.copy(trustState = trust), peerId) }
     }
 
     fun enqueue(record: MeshRecord, excludedPeerId: String? = null) {
@@ -200,7 +201,7 @@ class MeshRelayController(
     }
 
     fun onIncoming(record: MeshRecord, peerId: String?) {
-        if (closed || !seen.recordIfNew(record)) return
+        if (closed || record.trustState == MeshTrustState.INVALID || !seen.recordIfNew(record)) return
         when (record.type) {
             MeshRecordType.VOLUNTEER -> record.body.toVolunteerProfile(record)?.let(volunteerStore::save)
             MeshRecordType.RESOURCE -> record.body.toResourceRecord(record)?.let(resourceStore::save)

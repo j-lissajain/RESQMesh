@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.res.stringResource
+import com.resqmesh.app.R
+import com.resqmesh.app.ui.localizedText
 
 @Composable
 fun MapDestinationScreen(
@@ -38,20 +41,20 @@ fun MapDestinationScreen(
     selectedReport?.let { report ->
         AlertDialog(
             onDismissRequest = { selectedReport = null },
-            title = { Text(report.type.label) },
+             title = { Text(report.type.localizedText()) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Severity: ${report.severity.label}")
-                    Text("Status: ${report.status.label}")
+                     Text(stringResource(R.string.detail_severity, report.severity.localizedText()))
+                     Text(stringResource(R.string.detail_status, report.status.localizedText()))
                     Text(report.description)
-                    report.locationDescription?.let { Text("Landmark: $it") }
+                     report.locationDescription?.let { Text(stringResource(R.string.landmark_value, it)) }
                     report.location?.let {
                         Text("${"%.6f".format(it.latitude)}, ${"%.6f".format(it.longitude)}")
-                        Text("Source: ${it.source.label}")
-                    } ?: Text("Location: not provided")
+                         Text(stringResource(R.string.location_source, it.source.localizedText()))
+                     } ?: Text(stringResource(R.string.location_not_provided))
                 }
             },
-            confirmButton = { TextButton(onClick = { selectedReport = null }) { Text("Close") } }
+             confirmButton = { TextButton(onClick = { selectedReport = null }) { Text(stringResource(R.string.close)) } }
         )
     }
 }

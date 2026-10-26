@@ -5,6 +5,7 @@ import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 import java.util.UUID
+import com.resqmesh.app.security.MeshTrustState
 
 enum class VolunteerSkill(val label: String) {
     FIRST_AID("First aid"),
@@ -136,7 +137,9 @@ data class MeshRecord(
     val body: JSONObject,
     val hopCount: Int = 0,
     val remainingTtl: Int = EmergencyEnvelopeRules.MAX_HOP_LIMIT,
-    val lastHopId: String? = null
+    val lastHopId: String? = null,
+    val trustState: MeshTrustState = MeshTrustState.LEGACY_UNSIGNED,
+    val originFingerprint: String? = null
 ) {
     val key: String get() = "$recordId#$revision"
 }
@@ -234,7 +237,8 @@ fun VolunteerProfile.toMeshRecord(): MeshRecord = MeshRecord(
         put("resource_capabilities", resourceCapabilities)
         // Contact information is intentionally local-only and is never shared automatically.
         expiresAtMillis?.let { put("expires_at", it) }
-    }
+    },
+    trustState = if (isRemoteUnverified) MeshTrustState.LEGACY_UNSIGNED else MeshTrustState.LOCAL
 )
 
 fun ResourceRecord.toMeshRecord(): MeshRecord = MeshRecord(
@@ -258,7 +262,8 @@ fun ResourceRecord.toMeshRecord(): MeshRecord = MeshRecord(
         }
         put("availability", availability.name)
         expiresAtMillis?.let { put("expires_at", it) }
-    }
+    },
+    trustState = if (isRemoteUnverified) MeshTrustState.LEGACY_UNSIGNED else MeshTrustState.LOCAL
 )
 
 fun AssistanceResponse.toMeshRecord(): MeshRecord = MeshRecord(
@@ -275,7 +280,8 @@ fun AssistanceResponse.toMeshRecord(): MeshRecord = MeshRecord(
         put("assistance_type", assistanceType.name)
         put("message", message)
         put("status", status.name)
-    }
+    },
+    trustState = if (isRemoteUnverified) MeshTrustState.LEGACY_UNSIGNED else MeshTrustState.LOCAL
 )
 
 fun JSONObject.toVolunteerProfile(record: MeshRecord): VolunteerProfile? = runCatching {

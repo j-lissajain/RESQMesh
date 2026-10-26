@@ -18,6 +18,6 @@ class LanguagePreferenceStore(context: Context) {
     fun load(): LanguagePreference = LanguagePreference.fromStoredValue(preferences.getString("language", "en"))
 
     fun save(language: LanguagePreference) {
-        preferences.edit().putString("language", language.tag).commit()
+        preferences.edit().putString("language", language.tag).apply()
     }
 }

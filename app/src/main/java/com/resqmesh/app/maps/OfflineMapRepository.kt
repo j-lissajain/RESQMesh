@@ -4,9 +4,11 @@ import android.content.Context
 import android.util.Xml
 import org.xmlpull.v1.XmlPullParser
 import java.util.LinkedHashMap
+import com.resqmesh.app.R
 
 class OfflineMapRepository(context: Context) {
-    private val assetManager = context.applicationContext.assets
+    private val appContext = context.applicationContext
+    private val assetManager = appContext.assets
 
     fun datasetFiles(): List<String> = assetManager.list(NagpurMapData.DATASET_DIRECTORY).orEmpty()
         .filter { it.endsWith(".osm", ignoreCase = true) }
@@ -19,9 +21,9 @@ class OfflineMapRepository(context: Context) {
     }
 
     fun datasetDescription(): String = if (hasMapData()) {
-        "${datasetFiles().size} local OSM extracts · ${formatBytes(datasetBytes())}"
+        appContext.getString(R.string.map_dataset_description, datasetFiles().size, formatBytes(datasetBytes()))
     } else {
-        "Nagpur offline map data is missing from the app bundle."
+        appContext.getString(R.string.map_dataset_missing)
     }
 
     fun loadDataset(): OfflineMapDataset {

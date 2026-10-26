@@ -11,6 +11,7 @@ import com.resqmesh.app.data.EmergencyRelayPolicy
 import com.resqmesh.app.data.EmergencyReportRepository
 import com.resqmesh.app.data.EmergencySeenRepository
 import com.resqmesh.app.data.MeshRecord
+import com.resqmesh.app.security.MeshTrustState
 
 enum class EmergencyTransportResult {
     ACKNOWLEDGED,
@@ -33,7 +34,7 @@ interface EmergencyRelayTransport {
         callback: (EmergencyTransportResult, String?) -> Unit
     ): Boolean = false
 
-    fun setMeshRecordReceiver(receiver: ((MeshRecord, String?) -> Unit)?) = Unit
+    fun setMeshRecordReceiver(receiver: ((MeshRecord, String?, MeshTrustState) -> Unit)?) = Unit
 
     fun addConnectionListener(listener: () -> Unit): () -> Unit = {}
 }
@@ -143,7 +144,11 @@ class EmergencyRelayController(
     }
 
     fun onIncoming(report: EmergencyReport, actualPeerId: String?) {
-        if (closed || !isValid(report) || report.contentTrust != EmergencyContentTrust.REMOTE_UNVERIFIED) {
+        if (closed || !isValid(report) || report.contentTrust !in setOf(
+                EmergencyContentTrust.REMOTE_UNVERIFIED,
+                EmergencyContentTrust.REMOTE_AUTHENTICATED
+            )
+        ) {
             setError("An untrusted emergency payload was rejected before relay.")
             return
         }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import com.resqmesh.app.data.ThemePreference
+import com.resqmesh.app.data.AccessibilityPreferences
 
 private val DarkColorScheme = darkColorScheme(
     primary = EmergencyTeal,
@@ -44,6 +45,7 @@ private val LightColorScheme = lightColorScheme(
 fun RESQMeshTheme(
     themePreference: ThemePreference = ThemePreference.SYSTEM,
     dynamicColor: Boolean = false,
+    accessibilityPreferences: AccessibilityPreferences = AccessibilityPreferences(),
     content: @Composable () -> Unit
 ) {
     val darkTheme = when (themePreference) {
@@ -52,7 +54,26 @@ fun RESQMeshTheme(
         ThemePreference.DARK -> true
     }
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme,
+        colorScheme = when {
+            accessibilityPreferences.highContrast && darkTheme -> DarkColorScheme.copy(
+                primary = Color.White,
+                onPrimary = Color.Black,
+                secondary = Color.Yellow,
+                onSecondary = Color.Black,
+                onSurface = Color.White,
+                onSurfaceVariant = Color.White
+            )
+            accessibilityPreferences.highContrast -> LightColorScheme.copy(
+                primary = Color.Black,
+                onPrimary = Color.White,
+                secondary = Color.Black,
+                onSecondary = Color.White,
+                onSurface = Color.Black,
+                onSurfaceVariant = Color.Black
+            )
+            darkTheme -> DarkColorScheme
+            else -> LightColorScheme
+        },
         typography = Typography,
         content = content
     )

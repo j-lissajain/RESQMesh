@@ -32,8 +32,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.resqmesh.app.R
 import com.resqmesh.app.data.EmergencyRole
 import com.resqmesh.app.data.LocalProfile
+import com.resqmesh.app.ui.localizedText
 import com.resqmesh.app.ui.theme.EmergencyAmber
 import com.resqmesh.app.ui.theme.EmergencyBackground
 
@@ -67,19 +70,19 @@ fun ProfileSetupScreen(
             .padding(horizontal = 20.dp, vertical = 18.dp)
     ) {
         TextButton(onClick = onBack) {
-            Text(text = "Back", color = EmergencyAmber)
+            Text(text = stringResource(R.string.back), color = EmergencyAmber)
         }
 
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = if (existingProfile == null) "Create your local profile" else "Edit your local profile",
+            text = stringResource(if (existingProfile == null) R.string.create_local_profile else R.string.edit_local_profile),
             color = MaterialTheme.colorScheme.onSurface,
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.ExtraBold
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "This helps nearby people understand how you want to participate in the prototype.",
+            text = stringResource(R.string.profile_setup_description),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyLarge
         )
@@ -91,14 +94,14 @@ fun ProfileSetupScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "Important: self-declared information",
+                    text = stringResource(R.string.self_declared_title),
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Your name, role, and capabilities are not verified authentication or proof of professional qualifications. Do not treat a selection here as a credential or a trust score.",
+                    text = stringResource(R.string.self_declared_description),
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -110,12 +113,12 @@ fun ProfileSetupScreen(
             value = displayName,
             onValueChange = { displayName = it },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Display name") },
-            placeholder = { Text("How should others see you?") },
+            label = { Text(stringResource(R.string.display_name)) },
+            placeholder = { Text(stringResource(R.string.display_name_hint)) },
             singleLine = true,
             isError = displayNameError,
             supportingText = if (displayNameError) {
-                { Text("Enter a display name to continue.") }
+                 { Text(stringResource(R.string.display_name_required)) }
             } else {
                 null
             },
@@ -126,14 +129,14 @@ fun ProfileSetupScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
         Text(
-            text = "Choose a role",
+            text = stringResource(R.string.choose_role),
             color = MaterialTheme.colorScheme.onSurface,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "This is a local, self-described role and is not verified.",
+            text = stringResource(R.string.role_not_verified),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall
         )
@@ -143,7 +146,7 @@ fun ProfileSetupScreen(
                 FilterChip(
                     selected = selectedRole == role,
                     onClick = { selectedRole = role },
-                    label = { Text(role.label) },
+                    label = { Text(role.localizedText()) },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -151,7 +154,7 @@ fun ProfileSetupScreen(
         if (roleError) {
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "Choose a role to continue.",
+                text = stringResource(R.string.role_required),
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall
             )
@@ -162,12 +165,12 @@ fun ProfileSetupScreen(
             value = capabilities,
             onValueChange = { capabilities = it },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Capabilities (optional)") },
-            placeholder = { Text("e.g. first aid, transport, translation") },
+            label = { Text(stringResource(R.string.capabilities_optional)) },
+            placeholder = { Text(stringResource(R.string.capabilities_hint)) },
             minLines = 2,
             maxLines = 3,
             supportingText = {
-                Text("Optional and self-declared. Separate multiple capabilities with commas.")
+                Text(stringResource(R.string.capabilities_help))
             }
         )
 
@@ -195,14 +198,14 @@ fun ProfileSetupScreen(
             contentPadding = PaddingValues(vertical = 16.dp)
         ) {
             Text(
-                text = if (existingProfile == null) "Continue" else "Save Profile",
+                text = stringResource(if (existingProfile == null) R.string.continue_label else R.string.save_profile),
                 fontWeight = FontWeight.Bold
             )
         }
 
         Spacer(modifier = Modifier.height(12.dp))
         Text(
-            text = "Only this device's local profile is saved in this milestone. No account or cloud sync is used.",
+            text = stringResource(R.string.local_profile_disclaimer),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall
         )

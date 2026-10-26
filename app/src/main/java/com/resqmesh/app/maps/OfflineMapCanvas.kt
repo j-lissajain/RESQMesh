@@ -29,6 +29,8 @@ import com.resqmesh.app.data.EmergencyMapMarkerFilter
 import com.resqmesh.app.data.EmergencyReport
 import kotlin.math.max
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.res.stringResource
+import com.resqmesh.app.R
 import kotlin.math.min
 
 data class OfflineMapCamera(
@@ -56,6 +58,7 @@ fun OfflineMapCanvas(
     var mapGestureActive by remember { mutableStateOf(false) }
     val bounds = dataset?.bounds ?: NagpurMapData.bounds
     val markerReports = remember(reports) { EmergencyMapMarkerFilter.validMarkers(reports) }
+    val loadingLabel = stringResource(R.string.map_data_loading_label)
     val latestOnCameraChange by rememberUpdatedState(onCameraChange)
     val latestOnReportClick by rememberUpdatedState(onReportClick)
 
@@ -295,7 +298,7 @@ private fun drawMap(
             color = Color.DKGRAY
             textSize = 16f
         }
-        canvas.drawText("Loading local OpenStreetMap data…", 18f, 32f, loadingPaint)
+        canvas.drawText(loadingLabel, 18f, 32f, loadingPaint)
     }
 }
 

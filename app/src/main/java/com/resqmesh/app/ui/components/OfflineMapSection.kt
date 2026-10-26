@@ -29,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.resqmesh.app.data.EmergencyReport
@@ -41,6 +42,8 @@ import com.resqmesh.app.maps.OfflineMapCamera
 import com.resqmesh.app.maps.OfflineMapDataset
 import com.resqmesh.app.maps.OfflinePlaceSearch
 import com.resqmesh.app.ui.theme.EmergencyAmber
+import androidx.compose.ui.res.stringResource
+import com.resqmesh.app.R
 import java.util.Locale
 
 @Composable
@@ -72,7 +75,7 @@ fun OfflineNagpurMapCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Offline Nagpur map",
+                         text = stringResource(R.string.offline_nagpur_map),
                         color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
@@ -84,7 +87,7 @@ fun OfflineNagpurMapCard(
                     )
                 }
                 Text(
-                    text = "OFFLINE",
+                     text = stringResource(R.string.offline),
                     color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold
@@ -96,13 +99,13 @@ fun OfflineNagpurMapCard(
                 onValueChange = onSearchQueryChange,
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                label = { Text("Search local place names") },
-                placeholder = { Text("Road, neighborhood, landmark") }
+                 label = { Text(stringResource(R.string.search_local_places)) },
+                 placeholder = { Text(stringResource(R.string.road_neighborhood_landmark)) }
             )
             if (searchQuery.isNotBlank()) {
                 if (searchResults.isEmpty()) {
                     Text(
-                        text = "No matching place in the bundled Nagpur dataset.",
+                         text = stringResource(R.string.no_matching_place),
                         modifier = Modifier.padding(top = 6.dp),
                         color = MaterialTheme.colorScheme.tertiary,
                         style = MaterialTheme.typography.bodySmall
@@ -154,22 +157,21 @@ fun OfflineNagpurMapCard(
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Coverage: ${NagpurMapData.bounds.minLatitude}–${NagpurMapData.bounds.maxLatitude}°N, " +
-                    "${NagpurMapData.bounds.minLongitude}–${NagpurMapData.bounds.maxLongitude}°E",
+                 text = stringResource(R.string.map_coverage, NagpurMapData.bounds.minLatitude, NagpurMapData.bounds.maxLatitude, NagpurMapData.bounds.minLongitude, NagpurMapData.bounds.maxLongitude),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall
             )
             locationState.reading?.let { reading ->
                 if (!NagpurMapData.isCovered(reading.latitude, reading.longitude)) {
                     Text(
-                        text = "The device-reported location is outside the bundled Nagpur map coverage.",
+                         text = stringResource(R.string.outside_map_coverage),
                         color = MaterialTheme.colorScheme.tertiary,
                         style = MaterialTheme.typography.labelSmall
                     )
                 }
             }
             Text(
-                text = "Blue = device location · colored dots = saved emergencies · tap a dot for details",
+                 text = stringResource(R.string.map_legend),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall
             )
@@ -181,14 +183,14 @@ fun OfflineNagpurMapCard(
             Spacer(modifier = Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = onCenterOnLocation, modifier = Modifier.weight(1f)) {
-                    Text("Center on my location")
+                     Text(stringResource(R.string.center_my_location))
                 }
                 Button(
                     onClick = onOpenPicker,
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = EmergencyAmber, contentColor = MaterialTheme.colorScheme.onPrimary)
                 ) {
-                    Text("Choose on map", fontWeight = FontWeight.Bold)
+                     Text(stringResource(R.string.choose_on_map), fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -203,6 +205,7 @@ fun OfflineMapPickerDialog(
     onDismiss: () -> Unit,
     onConfirm: (Double, Double) -> Unit
 ) {
+    val context = LocalContext.current
     var camera by remember { mutableStateOf(initialCamera) }
     var searchQuery by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -210,11 +213,11 @@ fun OfflineMapPickerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Choose emergency location") },
+         title = { Text(stringResource(R.string.choose_emergency_location)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "Pan and zoom the bundled Nagpur map. The center pin is selected; this location is manually selected and unverified.",
+                     text = stringResource(R.string.map_picker_description),
                     style = MaterialTheme.typography.bodySmall
                 )
                 OutlinedTextField(
@@ -222,7 +225,7 @@ fun OfflineMapPickerDialog(
                     onValueChange = { searchQuery = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    label = { Text("Search offline place names") }
+                     label = { Text(stringResource(R.string.search_offline_places)) }
                 )
                 searchResults.take(4).forEach { place ->
                     TextButton(
@@ -254,7 +257,7 @@ fun OfflineMapPickerDialog(
                     Text(text = "+", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.headlineMedium)
                 }
                 Text(
-                    text = "Selected: ${"%.6f".format(Locale.US, camera.latitude)}, ${"%.6f".format(Locale.US, camera.longitude)}",
+                     text = stringResource(R.string.selected_coordinates, "%.6f".format(Locale.US, camera.latitude), "%.6f".format(Locale.US, camera.longitude)),
                     style = MaterialTheme.typography.bodySmall
                 )
                 error?.let { Text(text = it, color = MaterialTheme.colorScheme.error) }
@@ -264,19 +267,19 @@ fun OfflineMapPickerDialog(
             Button(
                 onClick = {
                     if (dataset?.features?.isNotEmpty() != true) {
-                        error = "Offline map data is still loading or missing from the app bundle."
+                         error = context.getString(R.string.map_data_loading)
                     } else if (!NagpurMapData.isCovered(camera.latitude, camera.longitude)) {
-                        error = "The selected point is outside the bundled offline coverage."
+                         error = context.getString(R.string.outside_offline_coverage)
                     } else {
                         onConfirm(camera.latitude, camera.longitude)
                     }
                 },
                 enabled = dataset?.features?.isNotEmpty() == true
             ) {
-                Text("Confirm location")
+                 Text(stringResource(R.string.confirm_location))
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } }
     )
 }
 
@@ -310,10 +313,10 @@ fun OfflineMapScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Offline map", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                 Text(stringResource(R.string.offline_map), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text(datasetDescription, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text("OFFLINE", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+             Text(stringResource(R.string.offline), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
         }
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedTextField(
@@ -321,8 +324,8 @@ fun OfflineMapScreen(
             onValueChange = { searchQuery = it },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-            label = { Text("Search Nagpur places") },
-            placeholder = { Text("Road, neighborhood, landmark") }
+             label = { Text(stringResource(R.string.search_nagpur_places)) },
+             placeholder = { Text(stringResource(R.string.road_neighborhood_landmark)) }
         )
         if (searchQuery.isNotBlank() && searchResults.isNotEmpty()) {
             Card(

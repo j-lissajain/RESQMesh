@@ -38,6 +38,9 @@ import com.resqmesh.app.bluetooth.BluetoothReadinessChecker
 import com.resqmesh.app.bluetooth.formatLastSeenTime
 import com.resqmesh.app.ui.theme.EmergencyAmber
 import com.resqmesh.app.ui.theme.EmergencySurface
+import androidx.compose.ui.res.stringResource
+import com.resqmesh.app.R
+import com.resqmesh.app.ui.localizedText
 
 @Composable
 fun BleDiscoverySection(
@@ -86,8 +89,8 @@ fun BleDiscoverySection(
             manager.startDiscovery()
         } else {
             state = state.copy(
-                statusMessage = "Discovery unavailable",
-                error = "Allow ${BluetoothPermissions.permissionLabel()} access to discover nearby RESQMesh devices."
+                statusMessage = context.getString(R.string.discovery_unavailable),
+                error = context.getString(R.string.allow_permission_discovery, BluetoothPermissions.permissionLabel(context))
             )
         }
     }
@@ -110,14 +113,14 @@ fun BleDiscoverySection(
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Nearby RESQMesh Devices",
+                 text = stringResource(R.string.nearby_devices),
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Actual BLE advertisements only. No profile information is broadcast.",
+                 text = stringResource(R.string.ble_broadcast_privacy),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall
             )
@@ -138,7 +141,7 @@ fun BleDiscoverySection(
                     shape = RoundedCornerShape(12.dp),
                     contentPadding = PaddingValues(vertical = 12.dp)
                 ) {
-                    Text(text = "Start Discovery", fontWeight = FontWeight.Bold)
+                     Text(text = stringResource(R.string.start_discovery), fontWeight = FontWeight.Bold)
                 }
                 OutlinedButton(
                     onClick = {
@@ -150,7 +153,7 @@ fun BleDiscoverySection(
                     shape = RoundedCornerShape(12.dp),
                     contentPadding = PaddingValues(vertical = 12.dp)
                 ) {
-                    Text(text = "Stop Discovery")
+                     Text(text = stringResource(R.string.stop_discovery))
                 }
             }
 
@@ -175,9 +178,9 @@ fun BleDiscoverySection(
             if (state.peers.isEmpty()) {
                 Text(
                     text = if (state.isActive) {
-                        "No RESQMesh devices discovered yet. Keep both phones nearby and awake."
+                         stringResource(R.string.no_devices_active)
                     } else {
-                        "No peers discovered in this session."
+                         stringResource(R.string.no_peers_session)
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
@@ -233,16 +236,16 @@ private fun PeerRow(
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(
-                text = "Anonymous peer $anonymousId",
+                text = stringResource(R.string.anonymous_peer, anonymousId),
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Bold
             )
             Text(
                 text = when {
-                    connected -> "Connected"
-                    selected -> "Selected"
-                    else -> "Tap to select"
+                     connected -> stringResource(R.string.connected)
+                     selected -> stringResource(R.string.selected)
+                     else -> stringResource(R.string.tap_to_select)
                 },
                 color = if (connected) MaterialTheme.colorScheme.primary else EmergencyAmber,
                 style = MaterialTheme.typography.labelSmall,
@@ -250,14 +253,14 @@ private fun PeerRow(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Last seen at $lastSeen",
+                 text = stringResource(R.string.last_seen, lastSeen),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall
             )
             Text(
                 text = rssi?.let {
-                    "RSSI: $it dBm (signal strength, not an accurate distance)"
-                } ?: "RSSI unavailable",
+                     stringResource(R.string.rssi_value, it)
+                 } ?: stringResource(R.string.rssi_unavailable),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall
             )
@@ -268,7 +271,7 @@ private fun PeerRow(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(10.dp)
             ) {
-                Text(text = if (connected) "Connected" else "Connect")
+                 Text(text = if (connected) stringResource(R.string.connected) else stringResource(R.string.connect))
             }
         }
     }
@@ -283,7 +286,7 @@ private fun MessagingPanel(
 ) {
     Spacer(modifier = Modifier.height(14.dp))
     Text(
-        text = "BLE messages",
+         text = stringResource(R.string.ble_messages),
         color = MaterialTheme.colorScheme.onSurface,
         style = MaterialTheme.typography.titleSmall,
         fontWeight = FontWeight.Bold
@@ -291,10 +294,10 @@ private fun MessagingPanel(
     Spacer(modifier = Modifier.height(4.dp))
     Text(
         text = when (state.connectionStatus) {
-            BleConnectionStatus.CONNECTED -> "Connected to ${state.connectedPeerId ?: "anonymous peer"}"
-            BleConnectionStatus.CONNECTING -> "Connecting..."
-            BleConnectionStatus.WAITING_FOR_PEER -> "Waiting for the peer to initiate the connection"
-            BleConnectionStatus.DISCONNECTED -> "Select a peer and connect to exchange messages"
+             BleConnectionStatus.CONNECTED -> stringResource(R.string.connected_to, state.connectedPeerId ?: stringResource(R.string.peer))
+             BleConnectionStatus.CONNECTING -> stringResource(R.string.connecting)
+             BleConnectionStatus.WAITING_FOR_PEER -> stringResource(R.string.waiting_peer_initiate)
+             BleConnectionStatus.DISCONNECTED -> stringResource(R.string.select_peer_connect)
         },
         color = if (state.connectionStatus == BleConnectionStatus.CONNECTED) {
             MaterialTheme.colorScheme.primary
@@ -314,7 +317,7 @@ private fun MessagingPanel(
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             state.messages.takeLast(8).forEach { message ->
                 Text(
-                    text = "${if (message.isIncoming) "Peer" else "You"}: ${message.text} · ${message.state.label}",
+                     text = "${if (message.isIncoming) stringResource(R.string.peer) else stringResource(R.string.you)}: ${message.text} · ${message.state.localizedText()}",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -329,8 +332,8 @@ private fun MessagingPanel(
         modifier = Modifier.fillMaxWidth(),
          enabled = state.connectionStatus == BleConnectionStatus.CONNECTED &&
              state.connectedPeerId != null && state.selectedPeerId == state.connectedPeerId,
-        label = { Text("Short test message") },
-        placeholder = { Text("Type a UTF-8 message") },
+         label = { Text(stringResource(R.string.short_test_message)) },
+         placeholder = { Text(stringResource(R.string.utf8_message_hint)) },
         minLines = 1,
         maxLines = 3
     )
@@ -347,15 +350,6 @@ private fun MessagingPanel(
         ),
         shape = RoundedCornerShape(10.dp)
     ) {
-        Text(text = "Send message", fontWeight = FontWeight.Bold)
+         Text(text = stringResource(R.string.send_message), fontWeight = FontWeight.Bold)
     }
 }
-
-private val com.resqmesh.app.bluetooth.MessageDeliveryState.label: String
-    get() = when (this) {
-        com.resqmesh.app.bluetooth.MessageDeliveryState.SENDING -> "Sending"
-        com.resqmesh.app.bluetooth.MessageDeliveryState.DELIVERED -> "Delivered"
-        com.resqmesh.app.bluetooth.MessageDeliveryState.RECEIVED -> "Received"
-        com.resqmesh.app.bluetooth.MessageDeliveryState.FAILED -> "Failed"
-        com.resqmesh.app.bluetooth.MessageDeliveryState.DISCONNECTED -> "Disconnected"
-    }

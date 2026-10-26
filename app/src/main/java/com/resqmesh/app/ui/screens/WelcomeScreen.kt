@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import com.resqmesh.app.ui.theme.EmergencyAmber
 import com.resqmesh.app.ui.theme.EmergencyBackground
 import com.resqmesh.app.ui.theme.EmergencySurface
+import androidx.compose.ui.res.stringResource
+import com.resqmesh.app.R
 
 @Composable
 fun WelcomeScreen(
@@ -47,7 +49,7 @@ fun WelcomeScreen(
             shape = RoundedCornerShape(14.dp)
         ) {
             Text(
-                text = "LOCAL-FIRST EMERGENCY NETWORK",
+                text = stringResource(R.string.welcome_badge),
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                 color = MaterialTheme.colorScheme.onPrimary,
                 style = MaterialTheme.typography.labelMedium,
@@ -65,7 +67,7 @@ fun WelcomeScreen(
         )
         Spacer(modifier = Modifier.height(12.dp))
         Text(
-            text = "Community-powered emergency coordination when infrastructure and connectivity fail.",
+            text = stringResource(R.string.welcome_tagline),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold
@@ -79,14 +81,14 @@ fun WelcomeScreen(
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
                 Text(
-                    text = "Start with a local profile",
+                    text = stringResource(R.string.welcome_start_profile),
                     color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "No account or internet connection is required for this prototype. Your self-declared profile stays on this device.",
+                    text = stringResource(R.string.welcome_no_account),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyLarge
                 )
@@ -106,7 +108,7 @@ fun WelcomeScreen(
             contentPadding = PaddingValues(vertical = 16.dp)
         ) {
             Text(
-                text = "Get Started",
+                text = stringResource(R.string.get_started),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -114,7 +116,7 @@ fun WelcomeScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            text = "Built for coordination, not credential verification. Share only what you are comfortable declaring locally.",
+            text = stringResource(R.string.welcome_disclaimer),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall
         )

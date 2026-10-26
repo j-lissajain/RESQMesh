@@ -30,6 +30,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.resqmesh.app.R
 import com.resqmesh.app.bluetooth.MeshRelayController
 import com.resqmesh.app.data.AssistanceResponse
 import com.resqmesh.app.data.AssistanceResponseStore
@@ -53,6 +55,7 @@ import com.resqmesh.app.data.VolunteerProfileStore
 import com.resqmesh.app.data.VolunteerSkill
 import com.resqmesh.app.data.LanguagePreference
 import com.resqmesh.app.ui.languageCopy
+import com.resqmesh.app.ui.localizedText
 import com.resqmesh.app.data.bumpContentRevision
 import java.util.UUID
 
@@ -98,7 +101,7 @@ fun CoordinationScreen(
     ) {
         Text(copy.coordination, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
-            "All records are local-first. Sharing is limited to appropriate coordination data over the active BLE mesh.",
+            stringResource(R.string.coordination_local_first),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
@@ -106,7 +109,14 @@ fun CoordinationScreen(
                 FilterChip(
                     selected = tab == item,
                     onClick = { tab = item },
-                    label = { Text(item.name.lowercase().replace('_', ' ').replaceFirstChar(Char::uppercase)) },
+                    label = {
+                        Text(stringResource(when (item) {
+                            CoordinationTab.VOLUNTEERS -> R.string.tab_volunteers
+                            CoordinationTab.RESOURCES -> R.string.tab_resources
+                            CoordinationTab.RESPONSES -> R.string.tab_responses
+                            CoordinationTab.SAFETY -> R.string.tab_safety
+                        }))
+                    },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -116,6 +126,7 @@ fun CoordinationScreen(
                 profiles = volunteers,
                 emergencies = emergencies,
                 onEdit = { showVolunteerEditor = true },
+                languagePreference = languagePreference,
                 onAvailability = { value ->
                     volunteers.firstOrNull { it.nodeId == localNodeId }?.let {
                         volunteerStore.save(it.copy(availability = value, revision = it.revision + 1, updatedAtMillis = System.currentTimeMillis()))
@@ -139,6 +150,7 @@ fun CoordinationScreen(
             )
             CoordinationTab.RESOURCES -> ResourceSection(
                 resources = resources,
+                languagePreference = languagePreference,
                 onAdd = { showResourceEditor = true },
                 onCommit = { resource ->
                     val updated = resource.copy(availability = ResourceAvailability.PROVISIONALLY_COMMITTED, revision = resource.revision + 1, updatedAtMillis = System.currentTimeMillis())
@@ -157,6 +169,7 @@ fun CoordinationScreen(
                 emergencies = emergencies,
                 responses = responses,
                 localNodeId = localNodeId,
+                languagePreference = languagePreference,
                 onStatus = { response, status ->
                     val updated = response.copy(status = status, revision = response.revision + 1, updatedAtMillis = System.currentTimeMillis())
                     responseStore.save(updated)
@@ -167,7 +180,8 @@ fun CoordinationScreen(
             CoordinationTab.SAFETY -> SafetySection(
                 preferences = safety,
                 onSave = { value -> safetyStore.save(value); refresh() },
-                onSafetySos = onSafetySos
+                onSafetySos = onSafetySos,
+                languagePreference = languagePreference
             )
         }
     }
@@ -206,40 +220,45 @@ private fun VolunteerSection(
     emergencies: List<EmergencyReport>,
     onEdit: () -> Unit,
     onAvailability: (VolunteerAvailability) -> Unit,
-    onOffer: (EmergencyReport, VolunteerSkill) -> Unit
+    onOffer: (EmergencyReport, VolunteerSkill) -> Unit,
+    languagePreference: LanguagePreference
 ) {
     val local = profiles.firstOrNull { !it.isRemoteUnverified }
-    Button(onClick = onEdit, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Edit volunteer profile" }) {
-        Text(if (local == null) "Register as volunteer" else "Edit volunteer profile")
+    val editDescription = stringResource(R.string.edit_volunteer_profile)
+    Button(onClick = onEdit, modifier = Modifier.fillMaxWidth().semantics { contentDescription = editDescription }) {
+        Text(stringResource(if (local == null) R.string.register_volunteer else R.string.edit_volunteer_profile))
     }
     local?.let {
+        val skillLabels = mutableListOf<String>()
+        for (skill in it.skills) skillLabels += skill.localizedText()
+        val operatingArea = if (it.operatingArea.isBlank()) stringResource(R.string.not_provided) else it.operatingArea
         Card {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(it.alias, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text("Skills: ${it.skills.joinToString { skill -> skill.label }}")
-                Text("Operating area: ${it.operatingArea.ifBlank { "Not provided" }}")
-                Text("Self-declared information is not professional certification.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.skills_value, skillLabels.joinToString()))
+                Text(stringResource(R.string.operating_area_value, operatingArea))
+                Text(stringResource(R.string.self_declared_not_certification), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     VolunteerAvailability.entries.forEach { availability ->
-                        FilterChip(selected = it.availability == availability, onClick = { onAvailability(availability) }, label = { Text(availability.label) })
+                        FilterChip(selected = it.availability == availability, onClick = { onAvailability(availability) }, label = { Text(availability.localizedText()) })
                     }
                 }
             }
         }
     }
-    Text("Nearby emergency opportunities", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Text(stringResource(R.string.nearby_emergency_opportunities), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
     val active = emergencies.filter { it.lifecycleStatus == EmergencyLifecycleStatus.ACTIVE }
-    if (active.isEmpty()) Text("No active emergency requests are stored on this device.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (active.isEmpty()) Text(stringResource(R.string.no_active_emergency_requests), color = MaterialTheme.colorScheme.onSurfaceVariant)
     active.forEach { emergency ->
         val suggestions = EmergencyMatchingEngine.volunteersFor(emergency, profiles)
         Card {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text("${emergency.type.label} · ${emergency.severity.label}", fontWeight = FontWeight.Bold)
+                Text("${emergency.type.localizedText()} · ${emergency.severity.localizedText()}", fontWeight = FontWeight.Bold)
                 Text(emergency.description, maxLines = 3)
-                Text("Matching is a suggestion, not assignment.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.matching_suggestion), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 val skill = suggestions.firstOrNull()?.volunteer?.skills?.firstOrNull() ?: VolunteerSkill.GENERAL_SUPPORT
                 Button(onClick = { onOffer(emergency, skill) }, enabled = local != null, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (local == null) "Register to offer help" else "Offer ${skill.label.lowercase()}")
+                    Text(if (local == null) stringResource(R.string.register_to_offer_help) else stringResource(R.string.offer_help, skill.localizedText()))
                 }
             }
         }
@@ -247,19 +266,20 @@ private fun VolunteerSection(
 }
 
 @Composable
-private fun ResourceSection(resources: List<ResourceRecord>, onAdd: () -> Unit, onCommit: (ResourceRecord) -> Unit, onUnavailable: (ResourceRecord) -> Unit) {
-    Button(onClick = onAdd, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Add a resource" }) { Text("Add resource") }
-    if (resources.isEmpty()) Text("No resources are registered locally.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun ResourceSection(resources: List<ResourceRecord>, languagePreference: LanguagePreference, onAdd: () -> Unit, onCommit: (ResourceRecord) -> Unit, onUnavailable: (ResourceRecord) -> Unit) {
+    val addResourceDescription = stringResource(R.string.add_resource)
+    Button(onClick = onAdd, modifier = Modifier.fillMaxWidth().semantics { contentDescription = addResourceDescription }) { Text(stringResource(R.string.add_resource)) }
+    if (resources.isEmpty()) Text(stringResource(R.string.no_resources_registered), color = MaterialTheme.colorScheme.onSurfaceVariant)
     resources.forEach { resource ->
         Card {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(resource.category.label, fontWeight = FontWeight.Bold)
+                Text(resource.category.localizedText(), fontWeight = FontWeight.Bold)
                 Text("${resource.quantity} ${resource.unit} · ${resource.description}")
-                Text("${resource.availability.label} · ${resource.approximateArea.ifBlank { "Area not specified" }}")
+                Text("${resource.availability.localizedText()} · ${resource.approximateArea.ifBlank { stringResource(R.string.area_not_specified) }}")
                 if (resource.availability == ResourceAvailability.AVAILABLE) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                        Button(onClick = { onCommit(resource) }, modifier = Modifier.weight(1f)) { Text("Commit") }
-                        OutlinedButton(onClick = { onUnavailable(resource) }, modifier = Modifier.weight(1f)) { Text("Unavailable") }
+                        Button(onClick = { onCommit(resource) }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.commit)) }
+                        OutlinedButton(onClick = { onUnavailable(resource) }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.availability_unavailable)) }
                     }
                 }
             }
@@ -272,26 +292,27 @@ private fun ResponseSection(
     emergencies: List<EmergencyReport>,
     responses: List<AssistanceResponse>,
     localNodeId: String,
+    languagePreference: LanguagePreference,
     onStatus: (AssistanceResponse, ResponseStatus) -> Unit
 ) {
     val activeIds = emergencies.filter { it.lifecycleStatus == EmergencyLifecycleStatus.ACTIVE }.map { it.id }.toSet()
     val visible = responses.filter { it.emergencyId in activeIds || activeIds.isEmpty() }
-    if (visible.isEmpty()) Text("No assistance responses are stored locally.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (visible.isEmpty()) Text(stringResource(R.string.no_assistance_responses), color = MaterialTheme.colorScheme.onSurfaceVariant)
     visible.forEach { response ->
         Card {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text("${response.responderAlias} · ${response.assistanceType.label}", fontWeight = FontWeight.Bold)
-                Text(response.message.ifBlank { "No message provided." })
-                Text(response.status.label)
+                Text("${response.responderAlias} · ${response.assistanceType.localizedText()}", fontWeight = FontWeight.Bold)
+                Text(response.message.ifBlank { stringResource(R.string.no_message_provided) })
+                Text(response.status.localizedText())
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (response.status == ResponseStatus.OFFERED) {
-                        Button(onClick = { onStatus(response, ResponseStatus.ACCEPTED) }) { Text("Accept") }
-                        OutlinedButton(onClick = { onStatus(response, ResponseStatus.DECLINED) }) { Text("Decline") }
+                        Button(onClick = { onStatus(response, ResponseStatus.ACCEPTED) }) { Text(stringResource(R.string.accept)) }
+                        OutlinedButton(onClick = { onStatus(response, ResponseStatus.DECLINED) }) { Text(stringResource(R.string.decline)) }
                     }
-                    if (response.status == ResponseStatus.ACCEPTED) Button(onClick = { onStatus(response, ResponseStatus.IN_PROGRESS) }) { Text("Start") }
-                    if (response.status == ResponseStatus.IN_PROGRESS) Button(onClick = { onStatus(response, ResponseStatus.COMPLETED) }) { Text("Complete") }
+                    if (response.status == ResponseStatus.ACCEPTED) Button(onClick = { onStatus(response, ResponseStatus.IN_PROGRESS) }) { Text(stringResource(R.string.start)) }
+                    if (response.status == ResponseStatus.IN_PROGRESS) Button(onClick = { onStatus(response, ResponseStatus.COMPLETED) }) { Text(stringResource(R.string.complete)) }
                     if (response.responderNodeId == localNodeId && response.status in setOf(ResponseStatus.OFFERED, ResponseStatus.ACCEPTED, ResponseStatus.IN_PROGRESS)) {
-                        OutlinedButton(onClick = { onStatus(response, ResponseStatus.WITHDRAWN) }) { Text("Withdraw") }
+                        OutlinedButton(onClick = { onStatus(response, ResponseStatus.WITHDRAWN) }) { Text(stringResource(R.string.withdraw)) }
                     }
                 }
             }
@@ -300,28 +321,34 @@ private fun ResponseSection(
 }
 
 @Composable
-private fun SafetySection(preferences: SafetyPreferences, onSave: (SafetyPreferences) -> Unit, onSafetySos: () -> Unit) {
+private fun SafetySection(
+    preferences: SafetyPreferences,
+    onSave: (SafetyPreferences) -> Unit,
+    onSafetySos: () -> Unit,
+    languagePreference: LanguagePreference
+) {
     var alias by remember { mutableStateOf("") }
     var contact by remember { mutableStateOf("") }
     Card {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Personal safety", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text("Safety alerts are offline records until a BLE peer acknowledges transport. Trusted contacts are never broadcast automatically.")
+            Text(stringResource(R.string.personal_safety), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.safety_alerts_local))
             FilterChip(
                 selected = preferences.discreetSosEnabled,
                 onClick = { onSave(preferences.copy(discreetSosEnabled = !preferences.discreetSosEnabled)) },
-                label = { Text(if (preferences.discreetSosEnabled) "Discreet SOS enabled" else "Enable discreet SOS") }
+                label = { Text(stringResource(if (preferences.discreetSosEnabled) R.string.discreet_sos_enabled else R.string.enable_discreet_sos)) }
             )
-            Button(onClick = onSafetySos, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Create personal safety SOS" }) {
-                Text("Personal safety SOS")
+            val safetySosDescription = stringResource(R.string.personal_safety_sos)
+            Button(onClick = onSafetySos, modifier = Modifier.fillMaxWidth().semantics { contentDescription = safetySosDescription }) {
+                Text(stringResource(R.string.personal_safety_sos))
             }
             FilterChip(
                 selected = preferences.sharePreciseLocationByDefault,
                 onClick = { onSave(preferences.copy(sharePreciseLocationByDefault = !preferences.sharePreciseLocationByDefault)) },
-                label = { Text(if (preferences.sharePreciseLocationByDefault) "Precise location by default" else "Use privacy-preserving location by default") }
+                label = { Text(stringResource(if (preferences.sharePreciseLocationByDefault) R.string.precise_location_default else R.string.privacy_location_default)) }
             )
-            OutlinedTextField(value = alias, onValueChange = { alias = it }, label = { Text("Trusted contact alias") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(value = contact, onValueChange = { contact = it }, label = { Text("Contact information") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = alias, onValueChange = { alias = it }, label = { Text(stringResource(R.string.trusted_contact_alias)) }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = contact, onValueChange = { contact = it }, label = { Text(stringResource(R.string.contact_information)) }, modifier = Modifier.fillMaxWidth())
             Button(
                 onClick = {
                     if (alias.isNotBlank() && contact.isNotBlank()) {
@@ -331,9 +358,9 @@ private fun SafetySection(preferences: SafetyPreferences, onSave: (SafetyPrefere
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("Save trusted contact") }
+            ) { Text(stringResource(R.string.save_trusted_contact)) }
             preferences.contacts.forEach { Text("${it.alias}: ${it.contactInfo}") }
-            Text("Child safety and personal safety reports use the same revision-aware emergency transport and should not include unnecessary identifying details.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.child_safety_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -349,21 +376,21 @@ private fun VolunteerEditorDialog(existing: VolunteerProfile?, nodeId: String, o
     var transport by remember { mutableStateOf(existing?.transportAvailable ?: false) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Volunteer profile") },
+         title = { Text(stringResource(R.string.volunteer_profile)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = alias, onValueChange = { alias = it }, label = { Text("Alias") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = area, onValueChange = { area = it }, label = { Text("Approximate operating area") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = capabilities, onValueChange = { capabilities = it }, label = { Text("Assistance capabilities") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = resourceCapabilities, onValueChange = { resourceCapabilities = it }, label = { Text("Resource capabilities") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = contactInfo, onValueChange = { contactInfo = it }, label = { Text("Optional contact information") }, modifier = Modifier.fillMaxWidth())
-                Text("Skills")
-                VolunteerSkill.entries.forEach { skill -> FilterChip(selected = skill in skills, onClick = { skills = if (skill in skills) skills - skill else skills + skill }, label = { Text(skill.label) }, modifier = Modifier.fillMaxWidth()) }
-                FilterChip(selected = transport, onClick = { transport = !transport }, label = { Text("Transport available") }, modifier = Modifier.fillMaxWidth())
+                 OutlinedTextField(value = alias, onValueChange = { alias = it }, label = { Text(stringResource(R.string.alias)) }, modifier = Modifier.fillMaxWidth())
+                 OutlinedTextField(value = area, onValueChange = { area = it }, label = { Text(stringResource(R.string.approximate_operating_area)) }, modifier = Modifier.fillMaxWidth())
+                 OutlinedTextField(value = capabilities, onValueChange = { capabilities = it }, label = { Text(stringResource(R.string.assistance_capabilities)) }, modifier = Modifier.fillMaxWidth())
+                 OutlinedTextField(value = resourceCapabilities, onValueChange = { resourceCapabilities = it }, label = { Text(stringResource(R.string.resource_capabilities)) }, modifier = Modifier.fillMaxWidth())
+                 OutlinedTextField(value = contactInfo, onValueChange = { contactInfo = it }, label = { Text(stringResource(R.string.optional_contact_information)) }, modifier = Modifier.fillMaxWidth())
+                 Text(stringResource(R.string.skills))
+                 VolunteerSkill.entries.forEach { skill -> FilterChip(selected = skill in skills, onClick = { skills = if (skill in skills) skills - skill else skills + skill }, label = { Text(skill.localizedText()) }, modifier = Modifier.fillMaxWidth()) }
+                 FilterChip(selected = transport, onClick = { transport = !transport }, label = { Text(stringResource(R.string.transport_available)) }, modifier = Modifier.fillMaxWidth())
             }
         },
-        confirmButton = { Button(onClick = { if (alias.isNotBlank() && skills.isNotEmpty()) onSave(VolunteerProfile(id = existing?.id ?: UUID.randomUUID().toString(), nodeId = nodeId, alias = alias.trim(), skills = skills, assistanceCapabilities = capabilities.trim(), operatingArea = area.trim(), transportAvailable = transport, resourceCapabilities = resourceCapabilities.trim(), contactInfo = contactInfo.trim().takeIf { it.isNotBlank() }, revision = (existing?.revision ?: 0) + 1)) }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+         confirmButton = { Button(onClick = { if (alias.isNotBlank() && skills.isNotEmpty()) onSave(VolunteerProfile(id = existing?.id ?: UUID.randomUUID().toString(), nodeId = nodeId, alias = alias.trim(), skills = skills, assistanceCapabilities = capabilities.trim(), operatingArea = area.trim(), transportAvailable = transport, resourceCapabilities = resourceCapabilities.trim(), contactInfo = contactInfo.trim().takeIf { it.isNotBlank() }, revision = (existing?.revision ?: 0) + 1)) }) { Text(stringResource(R.string.save)) } },
+         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } }
     )
 }
 
@@ -376,19 +403,19 @@ private fun ResourceEditorDialog(nodeId: String, alias: String, onDismiss: () ->
     var area by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Register resource") },
+         title = { Text(stringResource(R.string.register_resource)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                ResourceCategory.entries.forEach { item -> FilterChip(selected = item == category, onClick = { category = item }, label = { Text(item.label) }, modifier = Modifier.fillMaxWidth()) }
-                OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Description") }, modifier = Modifier.fillMaxWidth())
+                 ResourceCategory.entries.forEach { item -> FilterChip(selected = item == category, onClick = { category = item }, label = { Text(item.localizedText()) }, modifier = Modifier.fillMaxWidth()) }
+                 OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text(stringResource(R.string.description)) }, modifier = Modifier.fillMaxWidth())
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = quantity, onValueChange = { quantity = it }, label = { Text("Quantity") }, modifier = Modifier.weight(1f))
-                    OutlinedTextField(value = unit, onValueChange = { unit = it }, label = { Text("Unit") }, modifier = Modifier.weight(1f))
+                     OutlinedTextField(value = quantity, onValueChange = { quantity = it }, label = { Text(stringResource(R.string.quantity)) }, modifier = Modifier.weight(1f))
+                     OutlinedTextField(value = unit, onValueChange = { unit = it }, label = { Text(stringResource(R.string.unit)) }, modifier = Modifier.weight(1f))
                 }
-                OutlinedTextField(value = area, onValueChange = { area = it }, label = { Text("Approximate area") }, modifier = Modifier.fillMaxWidth())
+                 OutlinedTextField(value = area, onValueChange = { area = it }, label = { Text(stringResource(R.string.approximate_area)) }, modifier = Modifier.fillMaxWidth())
             }
         },
-        confirmButton = { Button(onClick = { quantity.toDoubleOrNull()?.takeIf { it >= 0 }?.let { amount -> if (description.isNotBlank() && unit.isNotBlank()) onSave(ResourceRecord(providerNodeId = nodeId, providerAlias = alias, category = category, description = description.trim(), quantity = amount, unit = unit.trim(), approximateArea = area.trim())) } }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+         confirmButton = { Button(onClick = { quantity.toDoubleOrNull()?.takeIf { it >= 0 }?.let { amount -> if (description.isNotBlank() && unit.isNotBlank()) onSave(ResourceRecord(providerNodeId = nodeId, providerAlias = alias, category = category, description = description.trim(), quantity = amount, unit = unit.trim(), approximateArea = area.trim())) } }) { Text(stringResource(R.string.save)) } },
+         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } }
     )
 }

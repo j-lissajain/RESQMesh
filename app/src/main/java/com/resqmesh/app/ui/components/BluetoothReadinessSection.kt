@@ -36,6 +36,8 @@ import com.resqmesh.app.bluetooth.BluetoothPermissions
 import com.resqmesh.app.bluetooth.BluetoothReadinessChecker
 import com.resqmesh.app.ui.theme.EmergencyAmber
 import com.resqmesh.app.ui.theme.EmergencySurface
+import androidx.compose.ui.res.stringResource
+import com.resqmesh.app.R
 
 @Composable
 fun BluetoothReadinessSection(modifier: Modifier = Modifier) {
@@ -68,40 +70,40 @@ fun BluetoothReadinessSection(modifier: Modifier = Modifier) {
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Bluetooth readiness",
+                        text = stringResource(R.string.bluetooth_readiness),
                         color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Device checks for BLE discovery and advertising",
+                        text = stringResource(R.string.ble_readiness_description),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
                 TextButton(onClick = { readiness = checker.check() }) {
-                    Text(text = "Refresh", color = EmergencyAmber)
+                    Text(text = stringResource(R.string.refresh), color = EmergencyAmber)
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
             ReadinessRow(
-                left = ReadinessItem("Bluetooth", supportStatus(readiness.bluetoothSupported)),
-                right = ReadinessItem("BLE", supportStatus(readiness.bleSupported))
+                left = ReadinessItem(stringResource(R.string.bluetooth), supportStatus(readiness.bluetoothSupported)),
+                right = ReadinessItem(stringResource(R.string.ble), supportStatus(readiness.bleSupported))
             )
             Spacer(modifier = Modifier.height(8.dp))
             ReadinessRow(
-                left = ReadinessItem("Bluetooth enabled", enabledStatus(readiness.bluetoothEnabled)),
+                left = ReadinessItem(stringResource(R.string.bluetooth_enabled), enabledStatus(readiness.bluetoothEnabled)),
                 right = ReadinessItem(
-                    "Permissions",
-                    if (readiness.requiredPermissionsGranted) "Granted" else "Needed"
+                    stringResource(R.string.permissions),
+                    if (readiness.requiredPermissionsGranted) stringResource(R.string.granted) else stringResource(R.string.needed)
                 )
             )
             Spacer(modifier = Modifier.height(8.dp))
             ReadinessRow(
                 left = ReadinessItem(
-                    "BLE advertising",
+                    stringResource(R.string.ble_advertising),
                     supportStatus(readiness.bleAdvertisingSupported)
                 ),
                 right = null
@@ -131,9 +133,9 @@ fun BluetoothReadinessSection(modifier: Modifier = Modifier) {
                 ) {
                     Text(
                         text = if (permissionRequestAttempted) {
-                            "Request ${BluetoothPermissions.permissionLabel()} again"
+                            stringResource(R.string.request_permission_again, BluetoothPermissions.permissionLabel(context))
                         } else {
-                            "Grant ${BluetoothPermissions.permissionLabel()} permission"
+                            stringResource(R.string.grant_permission, BluetoothPermissions.permissionLabel(context))
                         },
                         fontWeight = FontWeight.Bold
                     )
@@ -150,7 +152,7 @@ fun BluetoothReadinessSection(modifier: Modifier = Modifier) {
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(text = "Open app settings", color = EmergencyAmber)
+                        Text(text = stringResource(R.string.open_app_settings), color = EmergencyAmber)
                     }
                 }
             } else if (
@@ -166,7 +168,7 @@ fun BluetoothReadinessSection(modifier: Modifier = Modifier) {
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text(text = "Open Bluetooth settings")
+                    Text(text = stringResource(R.string.open_bluetooth_settings))
                 }
             }
         }
@@ -216,21 +218,30 @@ private fun ReadinessCell(
     }
 }
 
+@Composable
 private fun supportStatus(supported: Boolean?): String = when (supported) {
-    true -> "Supported"
-    false -> "Not supported"
-    null -> "Unknown"
-}
-
-private fun enabledStatus(enabled: Boolean?): String = when (enabled) {
-    true -> "On"
-    false -> "Off"
-    null -> "Unknown"
+    true -> stringResource(R.string.supported)
+    false -> stringResource(R.string.not_supported)
+    null -> stringResource(R.string.unknown)
 }
 
 @Composable
-private fun readinessColor(value: String): Color = when (value) {
-    "Supported", "On", "Granted" -> MaterialTheme.colorScheme.primary
-    "Unknown" -> EmergencyAmber
-    else -> MaterialTheme.colorScheme.error
+private fun enabledStatus(enabled: Boolean?): String = when (enabled) {
+    true -> stringResource(R.string.on)
+    false -> stringResource(R.string.off)
+    null -> stringResource(R.string.unknown)
+}
+
+@Composable
+private fun readinessColor(value: String): Color {
+    val positive = setOf(
+        stringResource(R.string.supported),
+        stringResource(R.string.on),
+        stringResource(R.string.granted)
+    )
+    return when {
+        value in positive -> MaterialTheme.colorScheme.primary
+        value == stringResource(R.string.unknown) -> EmergencyAmber
+        else -> MaterialTheme.colorScheme.error
+    }
 }

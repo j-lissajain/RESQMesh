@@ -15,8 +15,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.unit.Density
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -26,6 +30,8 @@ import com.resqmesh.app.bluetooth.BleMessagingManager
 import com.resqmesh.app.bluetooth.BleDiscoveryManager
 import com.resqmesh.app.bluetooth.EmergencyRelayController
 import com.resqmesh.app.bluetooth.MeshRelayController
+import com.resqmesh.app.bluetooth.BleRuntimeRegistry
+import com.resqmesh.app.bluetooth.BackgroundNetworkingStore
 import com.resqmesh.app.data.EmergencySeenStore
 import com.resqmesh.app.data.EmergencyRelayQueueStore
 import com.resqmesh.app.data.LocalEmergencyRepository
@@ -35,6 +41,8 @@ import com.resqmesh.app.data.LanguagePreference
 import com.resqmesh.app.data.LanguagePreferenceStore
 import com.resqmesh.app.data.ResourceStore
 import com.resqmesh.app.data.SafetyPreferencesStore
+import com.resqmesh.app.data.SafetyStateStore
+import com.resqmesh.app.data.AccessibilityPreferencesStore
 import com.resqmesh.app.data.VolunteerProfileStore
 import com.resqmesh.app.data.EmergencyReport
 import com.resqmesh.app.data.EmergencySeverity
@@ -60,9 +68,12 @@ import com.resqmesh.app.ui.screens.ProfileScreen
 import com.resqmesh.app.ui.screens.ProfileSetupScreen
 import com.resqmesh.app.ui.screens.WelcomeScreen
 import com.resqmesh.app.ui.screens.CoordinationScreen
+import com.resqmesh.app.ui.screens.SafetyHubScreen
 import com.resqmesh.app.ui.components.EmergencyReportingSection
 import com.resqmesh.app.ui.components.OfflineLocationPickerScreen
 import com.resqmesh.app.ui.theme.RESQMeshTheme
+import androidx.compose.ui.res.stringResource
+import com.resqmesh.app.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -76,20 +87,20 @@ private object Routes {
     const val PROFILE = "profile"
     const val LOCATION_PICKER = "location_picker"
     const val COORDINATION = "coordination"
+    const val SAFETY = "safety"
 }
 
 private data class MainDestination(
     val route: String,
-    val label: String,
     val icon: String
 )
 
 private val mainDestinations = listOf(
-    MainDestination(Routes.HOME, "Home", "⌂"),
-    MainDestination(Routes.MAP, "Map", "⌖"),
-    MainDestination(Routes.SOS, "SOS", "!"),
-    MainDestination(Routes.NETWORK, "Network", "◌"),
-    MainDestination(Routes.PROFILE, "Profile", "☰")
+    MainDestination(Routes.HOME, "⌂"),
+    MainDestination(Routes.MAP, "⌖"),
+    MainDestination(Routes.SOS, "!"),
+    MainDestination(Routes.NETWORK, "◌"),
+    MainDestination(Routes.PROFILE, "☰")
 )
 
 @Composable
@@ -102,8 +113,9 @@ fun ResqMeshApp() {
     val relayQueueStore = remember { EmergencyRelayQueueStore(context.applicationContext) }
     val localNodeId = remember { LocalNodeIdentityStore(context.applicationContext).getOrCreate() }
     val mapRepository = remember { OfflineMapRepository(context.applicationContext) }
-    val messagingManager = remember { BleMessagingManager(context.applicationContext) }
-    val discoveryManager = remember { BleDiscoveryManager(context.applicationContext) }
+    val messagingManager = remember { BleRuntimeRegistry.messaging(context.applicationContext) }
+    val discoveryManager = remember { BleRuntimeRegistry.discovery(context.applicationContext) }
+    val backgroundNetworkingStore = remember { BackgroundNetworkingStore(context.applicationContext) }
     val relayController = remember {
         EmergencyRelayController(
             repository = emergencyRepository,
@@ -117,6 +129,9 @@ fun ResqMeshApp() {
     val resourceStore = remember { ResourceStore(context.applicationContext) }
     val responseStore = remember { AssistanceResponseStore(context.applicationContext) }
     val safetyStore = remember { SafetyPreferencesStore(context.applicationContext) }
+    val safetyStateStore = remember { SafetyStateStore(context.applicationContext) }
+    val accessibilityStore = remember { AccessibilityPreferencesStore(context.applicationContext) }
+    val accessibilityFeedback = remember { AccessibilityFeedback(context.applicationContext) }
     val meshQueueStore = remember { com.resqmesh.app.bluetooth.MeshRecordQueueStore(context.applicationContext) }
     val meshSeenStore = remember { com.resqmesh.app.bluetooth.MeshSeenStore(context.applicationContext) }
     val meshRelay = remember {
@@ -138,6 +153,7 @@ fun ResqMeshApp() {
     var profile by remember { mutableStateOf(savedProfile) }
     var themePreference by remember { mutableStateOf(themeStore.load()) }
     var languagePreference by remember { mutableStateOf(languageStore.load()) }
+    var accessibilityPreferences by remember { mutableStateOf(accessibilityStore.load()) }
     var reports by remember { mutableStateOf(emergencyRepository.list()) }
     var relayState by remember { mutableStateOf(relayController.state) }
     var mapDataset by remember { mutableStateOf<OfflineMapDataset?>(null) }
@@ -149,14 +165,18 @@ fun ResqMeshApp() {
             mapDataset = withContext(Dispatchers.Default) { mapRepository.loadDataset() }
         }
     }
+    LaunchedEffect(languagePreference) {
+        LocaleController.apply(context, languagePreference)
+    }
+    val localizedContext = remember(languagePreference) {
+        LocaleController.localizedContext(context, languagePreference)
+    }
     DisposableEffect(relayController) {
         val remove = relayController.addListener { relayState = it }
         onDispose { remove() }
     }
     DisposableEffect(discoveryManager) {
-        onDispose {
-            discoveryManager.close()
-        }
+        onDispose { }
     }
     DisposableEffect(messagingManager, relayController) {
         messagingManager.setEmergencyReceiver { report, peerId ->
@@ -165,6 +185,7 @@ fun ResqMeshApp() {
         }
         onDispose { messagingManager.setEmergencyReceiver(null) }
     }
+    DisposableEffect(accessibilityFeedback) { onDispose { accessibilityFeedback.close() } }
     DisposableEffect(meshRelay) {
         meshRelay.setReceiver()
         onDispose {
@@ -175,7 +196,6 @@ fun ResqMeshApp() {
     DisposableEffect(messagingManager, relayController) {
         onDispose {
             relayController.close()
-            messagingManager.close()
         }
     }
     LaunchedEffect(relayState) {
@@ -189,7 +209,20 @@ fun ResqMeshApp() {
         }
     }
 
-    RESQMeshTheme(themePreference = themePreference, dynamicColor = false) {
+    val baseDensity = LocalDensity.current
+    CompositionLocalProvider(
+        LocalContext provides localizedContext,
+        LocalResources provides localizedContext.resources,
+        LocalDensity provides Density(
+            density = baseDensity.density,
+            fontScale = baseDensity.fontScale * if (accessibilityPreferences.largeText) 1.15f else 1f
+        )
+    ) {
+    RESQMeshTheme(
+        themePreference = themePreference,
+        dynamicColor = false,
+        accessibilityPreferences = accessibilityPreferences
+    ) {
         val backStackEntry by navController.currentBackStackEntryAsState()
         val currentDestination = backStackEntry?.destination
         val currentRoute = currentDestination?.route
@@ -217,7 +250,19 @@ fun ResqMeshApp() {
                                     }
                                 },
                                 icon = { Text(destination.icon) },
-                                label = { Text(destination.label) }
+                                label = {
+                                    Text(
+                                        stringResource(
+                                            when (destination.route) {
+                                                Routes.HOME -> R.string.nav_home
+                                                Routes.MAP -> R.string.nav_map
+                                                Routes.SOS -> R.string.nav_sos
+                                                Routes.NETWORK -> R.string.nav_network
+                                                else -> R.string.nav_profile
+                                            }
+                                        )
+                                    )
+                                }
                             )
                         }
                     }
@@ -264,7 +309,7 @@ fun ResqMeshApp() {
                                 val report = EmergencyReport(
                                     type = EmergencyType.OTHER,
                                     severity = EmergencySeverity.HIGH,
-                                    description = "Emergency assistance requested",
+                                    description = context.getString(R.string.instant_sos),
                                     createdAtMillis = System.currentTimeMillis(),
                                     originId = localNodeId,
                                     location = reading?.let {
@@ -280,6 +325,7 @@ fun ResqMeshApp() {
                                 emergencyRepository.save(report)
                                 relayController.enqueue(report)
                                 reports = emergencyRepository.list()
+                                accessibilityFeedback.speak(context.getString(R.string.emergency_saved_queued), languagePreference.tag, accessibilityPreferences.spokenFeedback)
                                 report.id
                             },
                             onCancelInstantSos = { id ->
@@ -291,6 +337,7 @@ fun ResqMeshApp() {
                                 }
                             },
                             onOpenCoordination = { navController.navigate(Routes.COORDINATION) },
+                            onOpenSafety = { navController.navigate(Routes.SAFETY) },
                             languagePreference = languagePreference
                         )
                     }
@@ -331,6 +378,8 @@ fun ResqMeshApp() {
                             }
                         },
                         assistanceResponses = responseStore.list(),
+                        simplifiedEmergencyMode = accessibilityPreferences.simplifiedEmergencyMode,
+                        languagePreference = languagePreference,
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(innerPadding)
@@ -341,6 +390,7 @@ fun ResqMeshApp() {
                         messagingManager = messagingManager,
                         discoveryManager = discoveryManager,
                         relayController = relayController,
+                        backgroundNetworkingStore = backgroundNetworkingStore,
                         contentPadding = innerPadding
                     )
                 }
@@ -358,7 +408,13 @@ fun ResqMeshApp() {
                             languagePreference = languagePreference,
                             onLanguageChange = {
                                 languageStore.save(it)
+                                LocaleController.apply(context, it)
                                 languagePreference = it
+                            },
+                            accessibilityPreferences = accessibilityPreferences,
+                            onAccessibilityChange = {
+                                accessibilityStore.save(it)
+                                accessibilityPreferences = it
                             }
                         )
                     }
@@ -373,12 +429,12 @@ fun ResqMeshApp() {
                         safetyStore = safetyStore,
                         meshRelay = meshRelay,
                         localNodeId = localNodeId,
-                        localAlias = profile?.displayName ?: "Local volunteer",
+                         localAlias = profile?.displayName ?: context.getString(R.string.role_volunteer),
                         onSafetySos = {
                             val report = EmergencyReport(
                                 type = EmergencyType.PERSONAL_SAFETY,
                                 severity = EmergencySeverity.CRITICAL,
-                                description = "Personal safety assistance requested",
+                                 description = context.getString(R.string.personal_safety_sos),
                                 createdAtMillis = System.currentTimeMillis(),
                                 originId = localNodeId
                             )
@@ -387,6 +443,25 @@ fun ResqMeshApp() {
                             reports = emergencyRepository.list()
                         },
                         languagePreference = languagePreference
+                    )
+                }
+                composable(Routes.SAFETY) {
+                    SafetyHubScreen(
+                        contentPadding = innerPadding,
+                        preferencesStore = safetyStore,
+                        stateStore = safetyStateStore,
+                        onSafetySos = {
+                            val report = EmergencyReport(
+                                type = EmergencyType.PERSONAL_SAFETY,
+                                severity = EmergencySeverity.CRITICAL,
+                                 description = context.getString(R.string.personal_safety_sos),
+                                createdAtMillis = System.currentTimeMillis(),
+                                originId = localNodeId
+                            )
+                            emergencyRepository.save(report)
+                            relayController.enqueue(report)
+                            reports = emergencyRepository.list()
+                        }
                     )
                 }
                 composable(Routes.LOCATION_PICKER) {
@@ -404,5 +479,6 @@ fun ResqMeshApp() {
                 }
             }
         }
+    }
     }
 }

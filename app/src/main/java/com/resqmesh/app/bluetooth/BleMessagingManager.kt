@@ -11,6 +11,7 @@ import android.bluetooth.BluetoothGattServerCallback
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
 import android.os.Build
 import android.os.Handler
@@ -19,6 +20,11 @@ import com.resqmesh.app.data.EmergencyWireCodec
 import com.resqmesh.app.data.EmergencyReport
 import com.resqmesh.app.data.MeshRecord
 import com.resqmesh.app.data.MeshRecordCodec
+import com.resqmesh.app.security.AndroidKeystoreDeviceIdentity
+import com.resqmesh.app.security.MeshTrustState
+import com.resqmesh.app.security.SecureMeshEnvelopeCodec
+import com.resqmesh.app.security.PeerTrustStore
+import com.resqmesh.app.security.MeshReplayGuard
 import java.nio.charset.StandardCharsets
 import java.util.ArrayDeque
 import java.util.LinkedHashMap
@@ -103,7 +109,10 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
     private val messages = ArrayDeque<ChatMessage>()
     private val pendingEmergencyIds = LinkedHashMap<Long, String>()
     private var emergencyReceiver: ((EmergencyReport, String?) -> Unit)? = null
-    private var meshRecordReceiver: ((MeshRecord, String?) -> Unit)? = null
+    private var meshRecordReceiver: ((MeshRecord, String?, MeshTrustState) -> Unit)? = null
+    private val deviceIdentity by lazy { AndroidKeystoreDeviceIdentity(appContext) }
+    private val peerTrustStore by lazy { PeerTrustStore(appContext) }
+    private val replayGuard = MeshReplayGuard()
 
     private var gattServer: BluetoothGattServer? = null
     private var messageCharacteristic: BluetoothGattCharacteristic? = null
@@ -162,7 +171,7 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
             }
 
             !readiness.requiredPermissionsGranted -> {
-                updateError("Allow ${BluetoothPermissions.permissionLabel()} access before starting messaging.")
+                updateError(appContext.getString(com.resqmesh.app.R.string.allow_permission_messaging, BluetoothPermissions.permissionLabel(appContext)))
                 return
             }
 
@@ -232,7 +241,7 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
         emergencyReceiver = receiver
     }
 
-    override fun setMeshRecordReceiver(receiver: ((MeshRecord, String?) -> Unit)?) {
+    override fun setMeshRecordReceiver(receiver: ((MeshRecord, String?, MeshTrustState) -> Unit)?) {
         meshRecordReceiver = receiver
     }
 
@@ -254,7 +263,11 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
         pendingEmergencyIds.clear()
         closeClientConnection(markPending = false)
         closeServerConnections(markPending = false)
-        gattServer?.close()
+        try {
+            gattServer?.close()
+        } catch (_: SecurityException) {
+            // Bluetooth permissions may be revoked while the session is stopping.
+        }
         gattServer = null
         messageCharacteristic = null
         clientWriteQueue.clear()
@@ -431,7 +444,14 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
         route: RouteRef,
         callback: (EmergencyTransportResult, String?) -> Unit
     ): Boolean {
-        val payload = runCatching { MeshRecordCodec.encode(record) }.getOrElse { return false }
+        val payload = runCatching {
+            SecureMeshEnvelopeCodec.encode(
+                payload = MeshRecordCodec.encode(record),
+                identity = deviceIdentity,
+                nowMillis = System.currentTimeMillis(),
+                ttlMillis = 24L * 60L * 60L * 1_000L
+            )
+        }.getOrElse { return false }
         val messageId = BleMessageProtocol.newMessageId()
         appendMessage(
             ChatMessage(
@@ -464,7 +484,14 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
         route: RouteRef,
         callback: ((EmergencyTransportResult, String?) -> Unit)? = null
     ): Boolean {
-        val payload = runCatching { EmergencyWireCodec.encode(report, report.originId) }
+        val payload = runCatching {
+            SecureMeshEnvelopeCodec.encode(
+                payload = EmergencyWireCodec.encode(report, report.originId),
+                identity = deviceIdentity,
+                nowMillis = System.currentTimeMillis(),
+                ttlMillis = 24L * 60L * 60L * 1_000L
+            )
+        }
             .getOrElse {
                 publish(
                     _state.copy(
@@ -917,21 +944,49 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
             }
         }
 
-        val emergency = EmergencyWireCodec.decode(payload)
-        val meshRecord = MeshRecordCodec.decode(payload)
-        if (text.startsWith(EmergencyWireCodec.DISCRIMINATOR) && emergency == null) {
+        val secureMesh = if (payload.toString(Charsets.UTF_8).startsWith("RESQSecureMesh")) {
+            SecureMeshEnvelopeCodec.decode(
+                encoded = payload,
+                verifier = deviceIdentity,
+                nowMillis = System.currentTimeMillis(),
+                isKnownFingerprint = peerTrustStore::isKnown
+            )
+        } else {
+            null
+        }
+        if (payload.toString(Charsets.UTF_8).startsWith("RESQSecureMesh") && secureMesh == null) {
+            updateError("An invalid or expired authenticated coordination message was rejected.")
+            return
+        }
+        if (secureMesh != null && !replayGuard.accept(secureMesh)) {
+            updateError("An authenticated message replay was rejected.")
+            return
+        }
+        val contentPayload = secureMesh?.payload ?: payload
+        val emergency = EmergencyWireCodec.decode(contentPayload)
+        val meshRecord = MeshRecordCodec.decode(contentPayload)?.let { record ->
+            record.copy(
+                trustState = secureMesh?.trustState ?: MeshTrustState.LEGACY_UNSIGNED,
+                originFingerprint = secureMesh?.fingerprint
+            )
+        }
+        val contentText = textForPayload(contentPayload)
+        if (contentText.startsWith(EmergencyWireCodec.DISCRIMINATOR) && emergency == null) {
             updateError("A malformed or unsupported emergency report was rejected.")
             return
         }
-        if (text.startsWith(MeshRecordCodec.DISCRIMINATOR) && meshRecord == null) {
+        if (contentText.startsWith(MeshRecordCodec.DISCRIMINATOR) && meshRecord == null) {
             updateError("A malformed or unsupported coordination record was rejected.")
             return
         }
         if (meshRecord != null) {
-            meshRecordReceiver?.invoke(meshRecord, route.peerId)
+            meshRecordReceiver?.invoke(meshRecord, route.peerId, meshRecord.trustState)
         }
         val incomingText = if (emergency != null) {
-            emergencyReceiver?.invoke(EmergencyWireCodec.toReceivedReport(emergency, route.peerId), route.peerId)
+            emergencyReceiver?.invoke(
+                EmergencyWireCodec.toReceivedReport(emergency, route.peerId, secureMesh?.trustState ?: MeshTrustState.LEGACY_UNSIGNED),
+                route.peerId
+            )
             "Emergency report ${emergency.emergencyId} received"
         } else if (meshRecord != null) {
             "${meshRecord.type.name.lowercase().replace('_', ' ')} received"
@@ -950,6 +1005,9 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
         )
         sendAcknowledgement(route, messageId)
     }
+
+    private fun textForPayload(payload: ByteArray): String =
+        BleMessageProtocol.decodeUtf8(payload).orEmpty()
 
     private fun handleAcknowledgement(messageId: Long) {
         val pending = pendingMessages.remove(messageId) ?: return
@@ -1095,7 +1153,7 @@ class BleMessagingManager(context: Context) : AutoCloseable, EmergencyRelayTrans
                     characteristic,
                     false,
                     next.bytes
-                ) == BluetoothGatt.GATT_SUCCESS
+                ) == BluetoothStatusCodes.SUCCESS
             } else {
                 characteristic.value = next.bytes
                 server.notifyCharacteristicChanged(connection.device, characteristic, false)

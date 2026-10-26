@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import com.resqmesh.app.data.EmergencyLocationSource
+import com.resqmesh.app.R
 
 object LocationPermissions {
     fun requiredPermissions(): Array<String> = arrayOf(
@@ -52,7 +53,7 @@ data class DeviceLocationReading(
 data class LocationEngineState(
     val reading: DeviceLocationReading? = null,
     val status: LocationStatus = LocationStatus.PERMISSION_REQUIRED,
-    val message: String = "Location permission is required to read device coordinates.",
+    val message: String = "",
     val isRefreshing: Boolean = false
 )
 
@@ -64,7 +65,7 @@ class OfflineLocationEngine(context: Context) : AutoCloseable {
     private var timeoutRunnable: Runnable? = null
     private var requestingUpdates = false
     private var closed = false
-    private var _state = LocationEngineState()
+    private var _state = LocationEngineState(message = appContext.getString(R.string.location_permission_required))
 
     val state: LocationEngineState
         get() = _state
@@ -85,7 +86,7 @@ class OfflineLocationEngine(context: Context) : AutoCloseable {
             publish(
                 _state.copy(
                     status = LocationStatus.PERMISSION_REQUIRED,
-                    message = "Allow foreground location access to read device coordinates.",
+                    message = appContext.getString(R.string.location_allow_foreground),
                     isRefreshing = false
                 )
             )
@@ -98,7 +99,7 @@ class OfflineLocationEngine(context: Context) : AutoCloseable {
                 LocationEngineState(
                     reading = cached,
                     status = classify(cached, System.currentTimeMillis(), isFreshFix = false),
-                    message = "Using a cached device reading while waiting for a fresh GNSS fix.",
+                     message = appContext.getString(R.string.location_cached),
                     isRefreshing = true
                 )
             )
@@ -106,7 +107,7 @@ class OfflineLocationEngine(context: Context) : AutoCloseable {
             publish(
                 _state.copy(
                     status = LocationStatus.ACQUIRING,
-                    message = "Acquiring a fresh GNSS/GPS fix. Internet is not required.",
+                     message = appContext.getString(R.string.location_acquiring),
                     isRefreshing = true
                 )
             )
@@ -114,7 +115,7 @@ class OfflineLocationEngine(context: Context) : AutoCloseable {
 
         if (!isGpsProviderEnabled()) {
             finishWithoutFreshFix(
-                "GPS/location services are disabled. Enable them or enter coordinates manually."
+                appContext.getString(R.string.gps_disabled)
             )
             return
         }
@@ -133,16 +134,16 @@ class OfflineLocationEngine(context: Context) : AutoCloseable {
                 if (requestingUpdates) {
                     stopUpdates()
                     finishWithoutFreshFix(
-                        "No fresh GNSS fix arrived before the timeout. Any shown coordinates are marked as cached."
+                        appContext.getString(R.string.location_no_fresh_fix)
                     )
                 }
             }
             timeoutRunnable = timeout
             mainHandler.postDelayed(timeout, ACQUISITION_TIMEOUT_MILLIS)
         } catch (_: SecurityException) {
-            finishWithoutFreshFix("Location permission was revoked. Grant it and try again.")
+            finishWithoutFreshFix(appContext.getString(R.string.location_permission_revoked))
         } catch (_: IllegalArgumentException) {
-            finishWithoutFreshFix("The GPS provider is unavailable on this device.")
+            finishWithoutFreshFix(appContext.getString(R.string.gps_unavailable))
         }
     }
 
@@ -155,7 +156,7 @@ class OfflineLocationEngine(context: Context) : AutoCloseable {
                 } else {
                     LocationStatus.PERMISSION_REQUIRED
                 },
-                message = "No device location is currently available."
+                message = appContext.getString(R.string.location_none)
             )
         )
     }
@@ -178,9 +179,9 @@ class OfflineLocationEngine(context: Context) : AutoCloseable {
                     reading = reading,
                     status = classify(reading, System.currentTimeMillis(), isFreshFix = true),
                     message = when {
-                        !reading.precisePermission -> "Device-reported coordinates use approximate permission; accuracy is not verified."
-                        reading.accuracyMeters == null -> "Fresh device-reported GNSS coordinates; provider accuracy was unavailable."
-                        else -> "Fresh device-reported GNSS coordinates; accuracy is not verified physically."
+                        !reading.precisePermission -> appContext.getString(R.string.location_approximate)
+                        reading.accuracyMeters == null -> appContext.getString(R.string.location_accuracy_unavailable)
+                        else -> appContext.getString(R.string.location_fresh_unverified)
                     },
                     isRefreshing = false
                 )
@@ -190,7 +191,7 @@ class OfflineLocationEngine(context: Context) : AutoCloseable {
         override fun onProviderDisabled(provider: String) {
             if (provider == LocationManager.GPS_PROVIDER) {
                 stopUpdates()
-                finishWithoutFreshFix("GPS/location services were disabled before a fresh fix arrived.")
+                finishWithoutFreshFix(appContext.getString(R.string.gps_disabled_before_fix))
             }
         }
     }

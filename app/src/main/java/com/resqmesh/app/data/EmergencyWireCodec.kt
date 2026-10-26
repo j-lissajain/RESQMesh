@@ -2,6 +2,7 @@ package com.resqmesh.app.data
 
 import java.nio.charset.StandardCharsets
 import java.util.Base64
+import com.resqmesh.app.security.MeshTrustState
 
 data class EmergencyWireMessage(
     val emergencyId: String,
@@ -163,7 +164,11 @@ object EmergencyWireCodec {
         )
     }
 
-    fun toReceivedReport(message: EmergencyWireMessage, peerId: String?): EmergencyReport = EmergencyReport(
+    fun toReceivedReport(
+        message: EmergencyWireMessage,
+        peerId: String?,
+        trustState: MeshTrustState = MeshTrustState.LEGACY_UNSIGNED
+    ): EmergencyReport = EmergencyReport(
         id = message.emergencyId,
         type = message.type,
         severity = message.severity,
@@ -187,7 +192,9 @@ object EmergencyWireCodec {
         remainingTtl = message.remainingTtl,
         lastHopId = message.lastHopId,
         contentRevision = message.contentRevision,
-        contentTrust = EmergencyContentTrust.REMOTE_UNVERIFIED,
+        contentTrust = if (trustState == MeshTrustState.AUTHENTICATED_KNOWN ||
+            trustState == MeshTrustState.AUTHENTICATED_UNKNOWN
+        ) EmergencyContentTrust.REMOTE_AUTHENTICATED else EmergencyContentTrust.REMOTE_UNVERIFIED,
         lifecycleStatus = message.lifecycleStatus,
         updatedAtMillis = message.updatedAtMillis
     )

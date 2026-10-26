@@ -71,6 +71,16 @@ data class BlePeer(
     val deviceAddress: String
 )
 
+internal object BlePeerRegistry {
+    fun merge(existing: Map<String, BlePeer>, incoming: BlePeer): Map<String, BlePeer> =
+        existing
+            .filterValues { it.deviceAddress != incoming.deviceAddress || it.anonymousId == incoming.anonymousId }
+            .toMutableMap()
+            .apply { put(incoming.anonymousId, incoming) }
+
+    fun stableOrder(peers: Collection<BlePeer>): List<BlePeer> = peers.sortedBy { it.anonymousId }
+}
+
 data class BleDiscoveryState(
     val isStarting: Boolean = false,
     val isScanning: Boolean = false,
@@ -101,6 +111,7 @@ class BleDiscoveryManager(context: Context) : AutoCloseable {
     private var scanCallback: ScanCallback? = null
     private var advertiseCallback: AdvertiseCallback? = null
     private var localAnonymousId: String? = null
+    private var sessionToken: ByteArray? = null
     private var closed = false
 
     private var _state = BleDiscoveryState()
@@ -122,7 +133,9 @@ class BleDiscoveryManager(context: Context) : AutoCloseable {
     fun startDiscovery() {
         if (closed || _state.isActive) return
 
-        peersById.clear()
+        peersById.entries.removeIf { (_, peer) ->
+            System.currentTimeMillis() - peer.lastSeenAtMillis > PEER_RETENTION_MILLIS
+        }
         publish(
             _state.copy(
                 isStarting = true,
@@ -146,7 +159,7 @@ class BleDiscoveryManager(context: Context) : AutoCloseable {
             }
 
             !readiness.requiredPermissionsGranted -> {
-                abort("Allow ${BluetoothPermissions.permissionLabel()} access before starting discovery.")
+                abort(appContext.getString(com.resqmesh.app.R.string.allow_permission_discovery, BluetoothPermissions.permissionLabel(appContext)))
                 return
             }
 
@@ -285,8 +298,8 @@ class BleDiscoveryManager(context: Context) : AutoCloseable {
             .setConnectable(true)
             .setTimeout(0)
             .build()
-        val sessionToken = ResqMeshBleProtocol.newSessionToken()
-        localAnonymousId = ResqMeshBleProtocol.anonymousIdFor(sessionToken)
+        val stableToken = sessionToken ?: ResqMeshBleProtocol.newSessionToken().also { sessionToken = it }
+        localAnonymousId = ResqMeshBleProtocol.anonymousIdFor(stableToken)
         val data = AdvertiseData.Builder()
             // The UUID identifies RESQMesh. The private manufacturer payload
             // carries only the anonymous session token. Together they remain
@@ -390,8 +403,10 @@ class BleDiscoveryManager(context: Context) : AutoCloseable {
             rssi = result.rssi,
             deviceAddress = result.device.address
         )
-        peersById[anonymousId] = peer
-        publish(_state.copy(peers = peersById.values.sortedByDescending { it.lastSeenAtMillis }))
+        val merged = BlePeerRegistry.merge(peersById, peer)
+        peersById.clear()
+        peersById.putAll(merged)
+        publish(_state.copy(peers = BlePeerRegistry.stableOrder(peersById.values)))
     }
 
     private fun abort(message: String) {
@@ -455,6 +470,10 @@ class BleDiscoveryManager(context: Context) : AutoCloseable {
         AdvertiseCallback.ADVERTISE_FAILED_INTERNAL_ERROR -> "internal advertiser error"
         AdvertiseCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> "too many active advertisers"
         else -> "error code $errorCode"
+    }
+
+    private companion object {
+        const val PEER_RETENTION_MILLIS = 60_000L
     }
 }
 
